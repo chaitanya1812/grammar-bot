@@ -1,0 +1,274 @@
+/* Popup Styles for Grammar Bot */
+
+body {
+    width: 350px;
+    min-height: 400px;
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #f8f9fa;
+    color: #333;
+}
+
+.popup-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Header */
+.popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    background: #2d5aa0;
+    color: white;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.logo-icon {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+.logo-text {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffd700;
+    animation: pulse 2s infinite;
+}
+
+.status-dot.online {
+    background: #28a745;
+    animation: none;
+}
+
+.status-dot.offline {
+    background: #dc3545;
+    animation: none;
+}
+
+.status-text {
+    font-size: 12px;
+    opacity: 0.9;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Content */
+.popup-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.instruction,
+.features-preview,
+.settings {
+    margin-bottom: 20px;
+}
+
+.instruction h3,
+.features-preview h3,
+.settings h3 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #2d5aa0;
+}
+
+.instruction ol {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.instruction li {
+    margin-bottom: 4px;
+    color: #666;
+}
+
+/* Features */
+.feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.feature-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: white;
+    border: 1px solid #e1e5e9;
+}
+
+.feature-item.enabled {
+    border-color: #28a745;
+    background: #f8fff9;
+}
+
+.feature-item.disabled {
+    opacity: 0.6;
+    background: #f1f1f1;
+}
+
+.feature-icon {
+    font-size: 14px;
+}
+
+.feature-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.feature-status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: #e1e5e9;
+    color: #666;
+}
+
+.feature-item.enabled .feature-status {
+    background: #28a745;
+    color: white;
+}
+
+/* Settings */
+.setting-item {
+    margin-bottom: 12px;
+}
+
+.setting-item label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #333;
+}
+
+.setting-item input[type="checkbox"] {
+    display: none;
+}
+
+.checkmark {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #ddd;
+    border-radius: 3px;
+    position: relative;
+    transition: all 0.2s;
+}
+
+.setting-item input[type="checkbox"]:checked + .checkmark {
+    background: #2d5aa0;
+    border-color: #2d5aa0;
+}
+
+.setting-item input[type="checkbox"]:checked + .checkmark::after {
+    content: '✓';
+    position: absolute;
+    top: -2px;
+    left: 1px;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* Footer */
+.popup-footer {
+    padding: 12px 16px;
+    background: white;
+    border-top: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+}
+
+.backend-status {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.backend-text {
+    color: #666;
+}
+
+.backend-status-text {
+    font-weight: 500;
+}
+
+.backend-status-text.online {
+    color: #28a745;
+}
+
+.backend-status-text.offline {
+    color: #dc3545;
+}
+
+.version {
+    color: #999;
+    font-size: 10px;
+}
+
+/* Scrollbar */
+.popup-content::-webkit-scrollbar {
+    width: 4px;
+}
+
+.popup-content::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.popup-content::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 2px;
+}
+
+.popup-content::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* Responsive */
+@media (max-width: 320px) {
+    body {
+        width: 300px;
+    }
+    
+    .popup-header {
+        padding: 12px;
+    }
+    
+    .popup-content {
+        padding: 12px;
+    }
+} 
