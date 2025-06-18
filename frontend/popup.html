@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grammar Bot</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <div class="popup-header">
+            <div class="logo">
+                <span class="logo-icon">✓</span>
+                <span class="logo-text">Grammar Bot</span>
+            </div>
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">Checking...</span>
+            </div>
+        </div>
+        
+        <div class="popup-content">
+            <div class="instruction">
+                <h3>How to use:</h3>
+                <ol>
+                    <li>Select text on any webpage</li>
+                    <li>Click "Grammar Check" in the popup</li>
+                    <li>Review and apply suggestions</li>
+                </ol>
+            </div>
+            
+            <div class="features-preview">
+                <h3>Available Features:</h3>
+                <div class="feature-list">
+                    <div class="feature-item enabled">
+                        <span class="feature-icon">✓</span>
+                        <span class="feature-name">Grammar Check</span>
+                        <span class="feature-status">Active</span>
+                    </div>
+                    <div class="feature-item disabled">
+                        <span class="feature-icon">📝</span>
+                        <span class="feature-name">Spell Check</span>
+                        <span class="feature-status">Coming Soon</span>
+                    </div>
+                    <div class="feature-item disabled">
+                        <span class="feature-icon">✨</span>
+                        <span class="feature-name">Improve Sentence</span>
+                        <span class="feature-status">Coming Soon</span>
+                    </div>
+                    <div class="feature-item disabled">
+                        <span class="feature-icon">🎭</span>
+                        <span class="feature-name">Change Tone</span>
+                        <span class="feature-status">Coming Soon</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings">
+                <h3>Settings:</h3>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="autoCheck" checked>
+                        <span class="checkmark"></span>
+                        Auto-check on text selection
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>
+                        <input type="checkbox" id="showToasts" checked>
+                        <span class="checkmark"></span>
+                        Show success notifications
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="popup-footer">
+            <div class="backend-status" id="backendStatus">
+                <span class="backend-text">Backend: </span>
+                <span class="backend-status-text">Checking connection...</span>
+            </div>
+            <div class="version">v1.0.0</div>
+        </div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html> 
