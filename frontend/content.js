@@ -16,6 +16,7 @@ class GrammarBot {
         this.originalSelectedText = null; // Store original text for sequential fixes
         this.suggestionLengthChanges = new Map(); // Store length changes for each suggestion
         this.textNodeWrapper = null; // Wrapper for text node fixes
+        this.lastFixAppliedTime = null; // Track when fixes were last applied
         
         this.init();
     }
@@ -102,6 +103,12 @@ class GrammarBot {
             // Don't interfere if we're checking grammar or applying fixes
             if (this.isCheckingGrammar || this.isApplyingFix) {
                 console.log('Grammar Bot: Ignoring text selection change during grammar check or fix application');
+                return;
+            }
+
+            // Prevent immediate re-triggering after fixes were applied
+            if (this.lastFixAppliedTime && Date.now() - this.lastFixAppliedTime < 3000) {
+                console.log('Grammar Bot: Ignoring text selection - fixes were recently applied');
                 return;
             }
 
@@ -711,6 +718,15 @@ class GrammarBot {
                     this.renderSuggestions(suggestionsEl);
                 }
                 
+                // Check if all suggestions have been applied
+                const allApplied = this.appliedSuggestions.size === this.currentSuggestions.length;
+                if (allApplied) {
+                    // Auto-close popup after a short delay since all fixes are now applied
+                    setTimeout(() => {
+                        this.hidePopupAndClearSelection();
+                    }, 600); // Close after 0.6 seconds
+                }
+                
                 console.log(`Grammar Bot: Applied suggestion ${suggestionIndex + 1}/${this.currentSuggestions.length}`);
             } else {
                 console.error('Grammar Bot: Fix application failed for suggestion:', suggestion.original_text);
@@ -955,6 +971,11 @@ class GrammarBot {
                 if (suggestionsEl) {
                     this.renderSuggestions(suggestionsEl);
                 }
+                
+                // Auto-close popup after a short delay since success notification is shown
+                setTimeout(() => {
+                    this.hidePopupAndClearSelection();
+                }, 600); // Close after 0.6 seconds
             } else {
                 this.showErrorMessage('Failed to apply remaining suggestions. Please try manually.');
             }
@@ -1112,20 +1133,51 @@ class GrammarBot {
             
             this.popup = null;
             this.isPopupVisible = false;
-            
-            // Clean up text node wrapper when hiding popup
-            if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
-                const parent = this.textNodeWrapper.parentNode;
-                while (this.textNodeWrapper.firstChild) {
-                    parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
-                }
-                parent.removeChild(this.textNodeWrapper);
-                console.log('Grammar Bot: Cleaned up text node wrapper on popup hide');
-            }
-            this.textNodeWrapper = null;
-        } else if (this.isCheckingGrammar) {
-            console.log('Grammar Bot: Prevented hiding popup during grammar check');
         }
+    }
+
+    hidePopupAndClearSelection() {
+        console.log('Grammar Bot: Hiding popup and clearing selection after fixes applied');
+        
+        // Hide the popup first
+        this.hidePopup();
+        
+        // Clear text selection to prevent re-triggering
+        if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
+            // For input/textarea elements, clear the selection
+            this.selectedElement.setSelectionRange(this.selectedElement.value.length, this.selectedElement.value.length);
+            console.log('Grammar Bot: Cleared input/textarea selection');
+        } else {
+            // For regular text selections, clear the window selection
+            const selection = window.getSelection();
+            if (selection) {
+                selection.removeAllRanges();
+                console.log('Grammar Bot: Cleared window selection');
+            }
+        }
+        
+        // Clean up text node wrapper
+        if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
+            const parent = this.textNodeWrapper.parentNode;
+            while (this.textNodeWrapper.firstChild) {
+                parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
+            }
+            parent.removeChild(this.textNodeWrapper);
+            console.log('Grammar Bot: Cleaned up text node wrapper on popup hide');
+        }
+        this.textNodeWrapper = null;
+        
+        // Reset our internal state
+        this.selectedElement = null;
+        this.selectionStart = null;
+        this.selectionEnd = null;
+        this.selectionRange = null;
+        this.selectedText = null;
+        this.appliedSuggestions.clear();
+        this.currentSuggestions = [];
+        this.lastFixAppliedTime = Date.now(); // Mark when fixes were applied
+        
+        console.log('Grammar Bot: Cleared internal state after fixes');
     }
 
 
