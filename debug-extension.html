@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grammar Bot Debug Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .debug-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background: #f0f8ff;
+        }
+        .console-output {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-text {
+            background: #ffffcc;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px dashed #999;
+        }
+    </style>
+</head>
+<body>
+    <h1>Grammar Bot Debug Page</h1>
+    
+    <div class="debug-section">
+        <h3>Extension Status</h3>
+        <p>This page will help debug why the Grammar Bot popup might not be appearing.</p>
+        <div id="extension-status">Checking...</div>
+        <button onclick="checkExtensionStatus()">Check Extension Status</button>
+    </div>
+
+    <div class="debug-section">
+        <h3>Test Text for Selection</h3>
+        <div class="test-text">
+            This is a simple text with some grammer mistakes for testing. Please select any part of this text to see if the popup appears.
+        </div>
+        <div class="test-text">
+            Here is another sentence with spelling erors that should trigger the extension popup when selected.
+        </div>
+    </div>
+
+    <div class="debug-section">
+        <h3>Console Output</h3>
+        <div class="console-output" id="console-output">
+            Console messages will appear here...
+        </div>
+        <button onclick="clearConsole()">Clear Console</button>
+        <button onclick="refreshLogs()">Refresh Logs</button>
+    </div>
+
+    <div class="debug-section">
+        <h3>Manual Tests</h3>
+        <button onclick="simulateSelection()">Simulate Text Selection</button>
+        <button onclick="checkGrammarBotGlobal()">Check Grammar Bot Global</button>
+        <button onclick="inspectPage()">Inspect Page Elements</button>
+    </div>
+
+    <script>
+        let logs = [];
+        
+        // Override console.log to capture messages
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        console.log = function(...args) {
+            logs.push('[LOG] ' + args.join(' '));
+            originalLog.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        console.error = function(...args) {
+            logs.push('[ERROR] ' + args.join(' '));
+            originalError.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        console.warn = function(...args) {
+            logs.push('[WARN] ' + args.join(' '));
+            originalWarn.apply(console, args);
+            updateConsoleOutput();
+        };
+        
+        function updateConsoleOutput() {
+            const output = document.getElementById('console-output');
+            output.innerHTML = logs.slice(-20).join('\n');
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function clearConsole() {
+            logs = [];
+            updateConsoleOutput();
+        }
+        
+        function refreshLogs() {
+            updateConsoleOutput();
+        }
+        
+        function checkExtensionStatus() {
+            const status = document.getElementById('extension-status');
+            
+            // Check if Grammar Bot global exists
+            if (window.grammarBot) {
+                status.innerHTML = '✅ Grammar Bot extension is loaded and initialized';
+                console.log('Grammar Bot global object found:', window.grammarBot);
+            } else {
+                status.innerHTML = '❌ Grammar Bot extension not found. Please check if extension is installed and enabled.';
+                console.error('Grammar Bot global object not found');
+            }
+            
+            // Check if content script is running
+            const scripts = Array.from(document.scripts);
+            const hasContentScript = scripts.some(script => 
+                script.src && script.src.includes('content.js')
+            );
+            
+            if (hasContentScript) {
+                console.log('Content script appears to be injected');
+            } else {
+                console.warn('Content script not found in page scripts');
+            }
+        }
+        
+        function simulateSelection() {
+            const testElement = document.querySelector('.test-text');
+            
+            // Create a range and select text
+            const range = document.createRange();
+            range.selectNodeContents(testElement);
+            
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            
+            console.log('Simulated text selection:', selection.toString());
+            
+            // Trigger mouseup event
+            const event = new MouseEvent('mouseup', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 100,
+                clientY: 100
+            });
+            testElement.dispatchEvent(event);
+        }
+        
+        function checkGrammarBotGlobal() {
+            if (window.grammarBot) {
+                console.log('Grammar Bot properties:', Object.keys(window.grammarBot));
+                console.log('Features:', window.grammarBot.features);
+                console.log('Is popup visible:', window.grammarBot.isPopupVisible);
+                console.log('Selected text:', window.grammarBot.selectedText);
+            } else {
+                console.error('Grammar Bot global not available');
+            }
+        }
+        
+        function inspectPage() {
+            // Look for Grammar Bot elements
+            const popups = document.querySelectorAll('.gb-popup');
+            console.log('Found Grammar Bot popups:', popups.length);
+            
+            if (popups.length > 0) {
+                popups.forEach((popup, index) => {
+                    console.log(`Popup ${index}:`, {
+                        visible: popup.style.display !== 'none',
+                        opacity: popup.style.opacity,
+                        position: popup.style.position,
+                        top: popup.style.top,
+                        left: popup.style.left,
+                        zIndex: popup.style.zIndex,
+                        classes: popup.className
+                    });
+                });
+            }
+            
+            // Check for any elements with grammar bot classes
+            const gbElements = document.querySelectorAll('[class*="gb-"]');
+            console.log('Found elements with grammar bot classes:', gbElements.length);
+        }
+        
+        // Auto-check status on load
+        window.addEventListener('load', () => {
+            setTimeout(checkExtensionStatus, 1000);
+        });
+        
+        // Listen for text selection
+        document.addEventListener('mouseup', () => {
+            const selection = window.getSelection();
+            if (selection.toString().trim().length > 0) {
+                console.log('Text selected on debug page:', selection.toString());
+            }
+        });
+        
+        console.log('Grammar Bot debug page loaded');
+    </script>
+</body>
+</html> 
