@@ -69,7 +69,7 @@ PROMPTS = {
         "has_errors": true/false
     }}
     
-    Only suggest corrections for actual grammar, spelling, or punctuation errors. 
+    Only suggest corrections for actual grammar, spelling, case or punctuation errors. 
     If the text is already correct, return "has_errors": false with an empty suggestions array.
     Keep explanations concise and helpful.
     """,
@@ -148,9 +148,13 @@ async def check_grammar(request: GrammarCheckRequest):
         # Get the appropriate prompt
         prompt_template = PROMPTS.get(request.feature, PROMPTS["grammar_check"])
         prompt = prompt_template.format(text=request.text)
+
+        print("req : ", request.text)
         
         # Call Gemini API
         response = model.generate_content(prompt)
+
+        print("response : ", response.text)
         
         if not response.text:
             raise HTTPException(status_code=500, detail="Failed to get response from AI model")

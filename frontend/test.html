@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grammar Bot Test</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h1>Grammar Bot Test Page</h1>
+        
+        <h2>Test Input Element:</h2>
+        <input type="text" placeholder="Type and select text here to test grammar checking..." style="width: 100%; padding: 10px; margin: 10px 0; font-size: 16px;">
+        
+        <h2>Test Textarea Element:</h2>
+        <textarea placeholder="Type and select text here to test grammar checking..." style="width: 100%; height: 100px; padding: 10px; margin: 10px 0; font-size: 16px; resize: vertical;"></textarea>
+        
+        <h2>Test Regular Text:</h2>
+        <p style="font-size: 16px; line-height: 1.5; padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">
+            This is a sample text that you can select to test the grammar bot functionality. 
+            Try selecting parts of this text to see if the grammar bot popup appears in the correct position.
+            There are some intentionnal grammatic errors here to test the suggestions.
+        </p>
+        
+        <h2>Instructions:</h2>
+        <ol>
+            <li>Select text in the input field above</li>
+            <li>Select text in the textarea above</li>
+            <li>Select text in the paragraph above</li>
+            <li>Click the "Grammar Check" button when popup appears</li>
+            <li>Test the "Apply Fix" and "Apply All Fixes" buttons</li>
+            <li>Verify the X button works to close the popup</li>
+        </ol>
+    </div>
+    
+    <script src="content.js"></script>
+</body>
+</html> 
