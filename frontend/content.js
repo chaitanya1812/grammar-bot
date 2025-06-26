@@ -15,6 +15,7 @@ class GrammarBot {
         this.isApplyingFix = false; // Prevent popup hiding during fix application
         this.originalSelectedText = null; // Store original text for sequential fixes
         this.suggestionLengthChanges = new Map(); // Store length changes for each suggestion
+        this.textNodeWrapper = null; // Wrapper for text node fixes
         
         this.init();
     }
@@ -82,6 +83,8 @@ class GrammarBot {
             }
         });
 
+
+
         // Temporarily disable scroll-based hiding to debug visibility issues
         // TODO: Re-enable with proper debouncing after popup visibility is confirmed
         /*
@@ -96,10 +99,21 @@ class GrammarBot {
 
     handleTextSelection(e) {
         setTimeout(() => {
-            // Don't interfere if we're checking grammar
-            if (this.isCheckingGrammar) {
+            // Don't interfere if we're checking grammar or applying fixes
+            if (this.isCheckingGrammar || this.isApplyingFix) {
+                console.log('Grammar Bot: Ignoring text selection change during grammar check or fix application');
                 return;
             }
+
+            // Don't reset state if we have an active popup with applied suggestions
+            // This prevents losing state between sequential fix applications
+            if (this.isPopupVisible && this.appliedSuggestions.size > 0) {
+                console.log('Grammar Bot: Preserving state - popup visible with', this.appliedSuggestions.size, 'applied suggestions');
+                return;
+            }
+
+            console.log('Grammar Bot: Resetting selection state for new text selection');
+            console.log('Grammar Bot: Previous state - selectedElement:', !!this.selectedElement, 'appliedSuggestions:', this.appliedSuggestions.size);
 
             // Reset selection data
             this.selectedElement = null;
@@ -109,6 +123,18 @@ class GrammarBot {
             this.originalSelectedText = null; // Reset original text for new selection
             this.suggestionLengthChanges.clear(); // Reset length change tracking
             this.appliedSuggestions.clear(); // Reset applied suggestions for new selection
+            
+            // Clean up text node wrapper if it exists
+            if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
+                // Replace wrapper with its contents
+                const parent = this.textNodeWrapper.parentNode;
+                while (this.textNodeWrapper.firstChild) {
+                    parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
+                }
+                parent.removeChild(this.textNodeWrapper);
+                console.log('Grammar Bot: Cleaned up previous text node wrapper');
+            }
+            this.textNodeWrapper = null;
 
             const activeElement = document.activeElement;
             let selectedText = '';
@@ -616,6 +642,8 @@ class GrammarBot {
             console.log('Grammar Bot: Apply remaining fixes button clicked');
             this.applyRemainingFixes();
         });
+
+
     }
 
     displayError(message) {
@@ -648,15 +676,26 @@ class GrammarBot {
             // Set flag to prevent popup from being hidden during fix application
             this.isApplyingFix = true;
             console.log('Grammar Bot: Starting fix application, popup protection enabled');
+            console.log('Grammar Bot: Suggestion to apply:', suggestion.original_text, '→', suggestion.corrected_text, 'Index:', suggestionIndex);
+            
+            // Debug current state
+            console.log('Grammar Bot: Current state - selectedElement:', this.selectedElement?.tagName, 'selectionRange:', !!this.selectionRange);
+            console.log('Grammar Bot: Applied suggestions so far:', Array.from(this.appliedSuggestions));
             
             // Apply this single suggestion (DON'T mark as applied until we know it succeeded)
             let success = false;
 
             // Check if we're dealing with an input or textarea element
             if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
+                console.log('Grammar Bot: Applying to input element');
                 success = this.applySingleToInputElement(this.selectedElement, suggestion, suggestionIndex);
             } else if (this.selectionRange) {
+                console.log('Grammar Bot: Applying to text node');
                 success = this.applySingleToTextNode(suggestion);
+            } else {
+                console.error('Grammar Bot: No valid target found - neither selectedElement nor selectionRange available');
+                console.log('Grammar Bot: selectedElement:', this.selectedElement);
+                console.log('Grammar Bot: selectionRange:', this.selectionRange);
             }
 
             if (success) {
@@ -674,6 +713,7 @@ class GrammarBot {
                 
                 console.log(`Grammar Bot: Applied suggestion ${suggestionIndex + 1}/${this.currentSuggestions.length}`);
             } else {
+                console.error('Grammar Bot: Fix application failed for suggestion:', suggestion.original_text);
                 this.showErrorMessage('Failed to apply the suggestion. Please try manually.');
             }
             
@@ -683,11 +723,11 @@ class GrammarBot {
             this.appliedSuggestions.delete(suggestionIndex);
             this.showErrorMessage('Failed to apply the suggestion. Please try manually.');
         } finally {
-            // Clear the flag after a short delay to allow DOM to settle
+            // Clear the flag after a longer delay to prevent race conditions with handleTextSelection
             setTimeout(() => {
                 this.isApplyingFix = false;
                 console.log('Grammar Bot: Fix application completed, popup protection disabled');
-            }, 100);
+            }, 200);
         }
     }
 
@@ -702,64 +742,74 @@ class GrammarBot {
                 return false;
             }
             
-            // Get the current text within the selection bounds
-            // Note: After previous fixes, endPos might have changed, so we need to get the actual current text
-            let currentSelectedText;
+            console.log('Grammar Bot: Applying suggestion to input element:', suggestion.original_text, '→', suggestion.corrected_text);
+            console.log('Grammar Bot: Original selection:', startPos, 'to', endPos);
             
+            // Get current text content
+            const currentText = element.value;
+            
+            // Calculate current end position based on applied changes
+            const totalLengthChange = this.calculateTotalLengthChange();
+            const currentEndPos = endPos + totalLengthChange;
+            
+            console.log('Grammar Bot: Current end position after previous changes:', currentEndPos, 'total length change:', totalLengthChange);
+            
+            // Get the currently selected text
+            let currentSelectedText = currentText.substring(startPos, currentEndPos);
+            
+            // Store original text if this is the first fix
             if (this.appliedSuggestions.size === 0) {
-                // First fix - use original positions
-                currentSelectedText = element.value.substring(startPos, endPos);
                 this.originalSelectedText = currentSelectedText;
-                console.log('Grammar Bot: First fix - using original positions');
-            } else {
-                // Subsequent fixes - calculate current end position based on applied changes
-                const totalLengthChange = this.calculateTotalLengthChange();
-                const currentEndPos = endPos + totalLengthChange;
-                currentSelectedText = element.value.substring(startPos, currentEndPos);
-                
-                // Update our stored end position
-                this.selectionEnd = currentEndPos;
-                console.log('Grammar Bot: Subsequent fix - calculated end position:', currentEndPos, 'total length change:', totalLengthChange);
+                console.log('Grammar Bot: Stored original text:', this.originalSelectedText);
             }
             
-            console.log('Grammar Bot: Current selected text for suggestion:', currentSelectedText);
+            console.log('Grammar Bot: Current selected text:', currentSelectedText);
             console.log('Grammar Bot: Looking for original text:', suggestion.original_text);
             
-            // Check if the suggestion's original text exists in the current selected text
-            if (!currentSelectedText.includes(suggestion.original_text)) {
+            // Find the suggestion's original text in the current content
+            const originalTextIndex = currentSelectedText.indexOf(suggestion.original_text);
+            if (originalTextIndex === -1) {
                 console.warn('Grammar Bot: Original text not found in current selection:', suggestion.original_text);
-                console.log('Current selected text:', currentSelectedText);
-                console.log('All applied suggestions so far:', Array.from(this.appliedSuggestions));
-                console.log('Length changes map:', this.suggestionLengthChanges);
+                console.log('Current selected text:', JSON.stringify(currentSelectedText));
+                console.log('Original text:', JSON.stringify(suggestion.original_text));
                 return false;
             }
             
-            // Apply the single suggestion to the current text
-            const newText = currentSelectedText.replace(suggestion.original_text, suggestion.corrected_text);
+            // Calculate absolute position in the full text
+            const absoluteStartPos = startPos + originalTextIndex;
+            const absoluteEndPos = absoluteStartPos + suggestion.original_text.length;
+            
+            console.log('Grammar Bot: Found original text at absolute position:', absoluteStartPos, 'to', absoluteEndPos);
+            
+            // Replace the text at the found position
+            const newValue = currentText.substring(0, absoluteStartPos) + 
+                            suggestion.corrected_text + 
+                            currentText.substring(absoluteEndPos);
+            
+            element.value = newValue;
             
             // Calculate the length difference for this fix
             const lengthDifference = suggestion.corrected_text.length - suggestion.original_text.length;
             
-            // Update the input value
-            const currentEndPos = this.selectionEnd;
-            element.value = element.value.substring(0, startPos) + newText + element.value.substring(currentEndPos);
-            
-            // Update the selection end position to account for this change
+            // Update our stored end position to account for this change
             this.selectionEnd = currentEndPos + lengthDifference;
             
-            // Store the length change for this suggestion for future calculations
+            // Store the length change for this suggestion
             if (!this.suggestionLengthChanges) {
                 this.suggestionLengthChanges = new Map();
             }
             this.suggestionLengthChanges.set(suggestionIndex, lengthDifference);
             
-            // Restore cursor position to end of modified text
-            const newCursorPos = startPos + newText.length;
+            // Position cursor at the end of the replaced text
+            const newCursorPos = absoluteStartPos + suggestion.corrected_text.length;
             element.setSelectionRange(newCursorPos, newCursorPos);
-            element.focus();
             
-            console.log('Grammar Bot: Successfully applied individual suggestion:', suggestion.original_text, '→', suggestion.corrected_text);
-            console.log('Length change:', lengthDifference, 'New end position:', this.selectionEnd);
+            // Don't focus the element as it might trigger selection change events
+            // that could clear our state
+            // element.focus();
+            
+            console.log('Grammar Bot: Successfully applied suggestion. Length change:', lengthDifference);
+            console.log('Grammar Bot: New selection end position:', this.selectionEnd);
             
             return true;
         } catch (error) {
@@ -800,47 +850,63 @@ class GrammarBot {
 
     applyToTextNode(suggestion) {
         try {
-            // For text nodes, we need to work with the current text content
-            // since the original selection range becomes invalid after modification
+            console.log('Grammar Bot: Applying suggestion to text node:', suggestion.original_text, '→', suggestion.corrected_text);
             
-            // Get the current text content of the selected area
-            let currentText;
-            if (this.originalSelectedText) {
-                // Use the stored original text and apply fixes sequentially
-                currentText = this.originalSelectedText;
-            } else {
-                // Store the original text for subsequent fixes
-                currentText = this.selectionRange.toString();
-                this.originalSelectedText = currentText;
-            }
-            
-            // Check if the suggestion still applies to the current text
-            if (!currentText.includes(suggestion.original_text)) {
-                console.warn('Grammar Bot: Original text not found in current content, skipping suggestion:', suggestion.original_text);
+            if (!this.selectionRange) {
+                console.error('No selection range available for text node fix');
                 return false;
             }
             
-            // Apply the fix to our stored text
-            const newText = currentText.replace(suggestion.original_text, suggestion.corrected_text);
-            this.originalSelectedText = newText;
-            
-            // Replace the content in the DOM
-            this.selectionRange.deleteContents();
-            this.selectionRange.insertNode(document.createTextNode(newText));
-            
-            // Update the range to cover the new text
-            const newRange = document.createRange();
-            const textNode = this.selectionRange.startContainer.nextSibling || this.selectionRange.startContainer;
-            if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-                newRange.setStart(textNode, 0);
-                newRange.setEnd(textNode, newText.length);
-                this.selectionRange = newRange;
+            // For the first fix, store the original content and create a new strategy
+            if (this.appliedSuggestions.size === 0) {
+                // Store the original selection for reference
+                this.originalSelectedText = this.selectionRange.toString();
+                console.log('Grammar Bot: Stored original text for text node:', this.originalSelectedText);
+                
+                // Create a container to hold our working text
+                const wrapper = document.createElement('span');
+                wrapper.className = 'gb-temp-wrapper';
+                wrapper.style.cssText = 'display: inline; background: transparent; border: none; margin: 0; padding: 0;';
+                
+                // Extract the original content
+                const originalContent = this.selectionRange.extractContents();
+                wrapper.appendChild(originalContent);
+                
+                // Insert the wrapper at the selection point
+                this.selectionRange.insertNode(wrapper);
+                
+                // Store reference to our wrapper
+                this.textNodeWrapper = wrapper;
+                
+                console.log('Grammar Bot: Created wrapper for text node processing');
             }
             
-            // Clear selection visually but keep our internal range
-            window.getSelection().removeAllRanges();
+            if (!this.textNodeWrapper || !this.textNodeWrapper.parentNode) {
+                console.error('Text node wrapper not available or removed from DOM');
+                return false;
+            }
             
-            console.log('Grammar Bot: Applied text node fix, updated stored text');
+            // Get current text content from wrapper
+            const currentText = this.textNodeWrapper.textContent;
+            console.log('Grammar Bot: Current wrapper text:', currentText);
+            
+            // Find and replace the suggestion
+            const originalTextIndex = currentText.indexOf(suggestion.original_text);
+            if (originalTextIndex === -1) {
+                console.warn('Grammar Bot: Original text not found in wrapper:', suggestion.original_text);
+                console.log('Current wrapper text:', JSON.stringify(currentText));
+                return false;
+            }
+            
+            // Apply the replacement
+            const newText = currentText.substring(0, originalTextIndex) + 
+                           suggestion.corrected_text + 
+                           currentText.substring(originalTextIndex + suggestion.original_text.length);
+            
+            // Update the wrapper content
+            this.textNodeWrapper.textContent = newText;
+            
+            console.log('Grammar Bot: Updated wrapper text to:', newText);
             
             return true;
         } catch (error) {
@@ -1046,10 +1112,23 @@ class GrammarBot {
             
             this.popup = null;
             this.isPopupVisible = false;
+            
+            // Clean up text node wrapper when hiding popup
+            if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
+                const parent = this.textNodeWrapper.parentNode;
+                while (this.textNodeWrapper.firstChild) {
+                    parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
+                }
+                parent.removeChild(this.textNodeWrapper);
+                console.log('Grammar Bot: Cleaned up text node wrapper on popup hide');
+            }
+            this.textNodeWrapper = null;
         } else if (this.isCheckingGrammar) {
             console.log('Grammar Bot: Prevented hiding popup during grammar check');
         }
     }
+
+
 }
 
 // Initialize Grammar Bot when DOM is ready (prevent multiple instances)

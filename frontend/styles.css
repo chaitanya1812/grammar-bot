@@ -479,4 +479,118 @@
     .gb-spinner {
         animation: none !important;
     }
+}
+
+/* Enhanced styles for better UX */
+
+/* Section indicator in suggestions header */
+.gb-suggestions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+/* Improved apply buttons with better visual hierarchy */
+.gb-apply-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+}
+
+.gb-apply-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+}
+
+.gb-apply-remaining-btn {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+    border: none;
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: 0 2px 6px rgba(255, 107, 107, 0.3);
+}
+
+.gb-apply-remaining-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(255, 107, 107, 0.4);
+}
+
+/* Enhanced suggestion items */
+.gb-suggestion-item {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #fafafa;
+    transition: all 0.2s ease;
+}
+
+.gb-suggestion-item:hover {
+    background: #f0f8ff;
+    border-color: #2196F3;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+.gb-suggestion-item.gb-applied {
+    background: #e8f5e8;
+    border-color: #4CAF50;
+}
+
+/* Better typography for suggestions */
+.gb-original {
+    background: #ffebee;
+    color: #c62828;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.gb-corrected {
+    background: #e8f5e8;
+    color: #2e7d32;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.gb-arrow {
+    margin: 0 8px;
+    color: #666;
+    font-weight: bold;
+}
+
+/* Responsive design for smaller screens */
+@media (max-width: 480px) {
+    .gb-popup {
+        width: calc(100vw - 20px) !important;
+        max-width: none !important;
+        left: 10px !important;
+        right: 10px !important;
+        transform: none !important;
+    }
+    
+    .gb-auto-controls {
+        flex-direction: column;
+    }
+    
+    .gb-auto-controls button {
+        width: 100%;
+        margin-bottom: 4px;
+    }
 } 
