@@ -1,23 +1,13 @@
 // Popup JavaScript for Grammar Bot
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // Initialize popup
     await initializePopup();
-    
-    // Set up event listeners
     setupEventListeners();
-    
-    // Check backend status
     await checkBackendStatus();
-    
-    // Load user settings
     loadSettings();
 });
 
 async function initializePopup() {
-    console.log('Grammar Bot popup initialized');
-    
-    // Load features from backend
     try {
         const response = await fetch('http://localhost:8000/features');
         const data = await response.json();
@@ -28,7 +18,6 @@ async function initializePopup() {
 }
 
 function setupEventListeners() {
-    // Settings checkboxes
     const autoCheckbox = document.getElementById('autoCheck');
     const toastCheckbox = document.getElementById('showToasts');
     
@@ -53,7 +42,6 @@ async function checkBackendStatus() {
         });
         
         if (response.ok) {
-            // Backend is online
             statusDot.className = 'status-dot online';
             statusText.textContent = 'Online';
             backendStatusText.textContent = 'Connected';
@@ -62,13 +50,10 @@ async function checkBackendStatus() {
             throw new Error('Backend responded with error');
         }
     } catch (error) {
-        // Backend is offline
         statusDot.className = 'status-dot offline';
         statusText.textContent = 'Offline';
         backendStatusText.textContent = 'Disconnected';
         backendStatusText.className = 'backend-status-text offline';
-        
-        console.error('Backend connection failed:', error);
     }
 }
 
@@ -98,20 +83,17 @@ function loadSettings() {
         const showToasts = document.getElementById('showToasts');
         
         if (autoCheck) {
-            autoCheck.checked = result.autoCheck !== false; // Default to true
+            autoCheck.checked = result.autoCheck !== false;
         }
         
         if (showToasts) {
-            showToasts.checked = result.showToasts !== false; // Default to true
+            showToasts.checked = result.showToasts !== false;
         }
     });
 }
 
 function saveSettings(settings) {
     chrome.storage.sync.set(settings, () => {
-        console.log('Settings saved:', settings);
-        
-        // Send message to content script to update settings
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (tabs[0]) {
                 chrome.tabs.sendMessage(tabs[0].id, {

@@ -584,13 +584,4 @@
         right: 10px !important;
         transform: none !important;
     }
-    
-    .gb-auto-controls {
-        flex-direction: column;
-    }
-    
-    .gb-auto-controls button {
-        width: 100%;
-        margin-bottom: 4px;
-    }
 } 
