@@ -4,36 +4,127 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grammar Bot Test</title>
-    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .test-section {
+            margin: 30px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        
+        textarea, input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        .content-editable {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 100px;
+            border-radius: 4px;
+        }
+        
+        h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .instructions {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
-    <div style="padding: 20px; font-family: Arial, sans-serif;">
-        <h1>Grammar Bot Test Page</h1>
-        
-        <h2>Test Input Element:</h2>
-        <input type="text" placeholder="Type and select text here to test grammar checking..." style="width: 100%; padding: 10px; margin: 10px 0; font-size: 16px;">
-        
-        <h2>Test Textarea Element:</h2>
-        <textarea placeholder="Type and select text here to test grammar checking..." style="width: 100%; height: 100px; padding: 10px; margin: 10px 0; font-size: 16px; resize: vertical;"></textarea>
-        
-        <h2>Test Regular Text:</h2>
-        <p style="font-size: 16px; line-height: 1.5; padding: 10px; border: 1px solid #ddd; background: #f9f9f9;">
-            This is a sample text that you can select to test the grammar bot functionality. 
-            Try selecting parts of this text to see if the grammar bot popup appears in the correct position.
-            There are some intentionnal grammatic errors here to test the suggestions.
-        </p>
-        
-        <h2>Instructions:</h2>
+    <h1>Grammar Bot Test Page</h1>
+    
+    <div class="instructions">
+        <h3>Testing Instructions:</h3>
         <ol>
-            <li>Select text in the input field above</li>
-            <li>Select text in the textarea above</li>
-            <li>Select text in the paragraph above</li>
-            <li>Click the "Grammar Check" button when popup appears</li>
-            <li>Test the "Apply Fix" and "Apply All Fixes" buttons</li>
-            <li>Verify the X button works to close the popup</li>
+            <li><strong>Button Shows Yellow without Number Issue:</strong> Type text with errors and see if button shows number correctly</li>
+            <li><strong>Popup Closing Issue:</strong> Click on suggestions and verify popup stays open</li>
+            <li><strong>Text samples to test:</strong>
+                <ul>
+                    <li>"I are going to the store" (subject-verb agreement)</li>
+                    <li>"He have a car" (subject-verb agreement)</li>
+                    <li>"The cat run fast" (subject-verb agreement)</li>
+                </ul>
+            </li>
+            <li> The weather was very nice yesterday, but today it rain heavily and I forgot my umbrella at home. This is a test sentences. It have some grammar mistake that should be detect by the AI.</li>
         </ol>
     </div>
-    
-    <script src="content.js"></script>
+
+    <div class="test-section">
+        <h3>1. Regular Textarea</h3>
+        <textarea placeholder="Type some text with grammar errors here... Try: 'I are going to store'"></textarea>
+    </div>
+
+    <div class="test-section">
+        <h3>2. Text Input</h3>
+        <input type="text" placeholder="Type text with errors here...">
+    </div>
+
+    <div class="test-section">
+        <h3>3. Email Input</h3>
+        <input type="email" placeholder="test@example.com - but add some text with errors">
+    </div>
+
+    <div class="test-section">
+        <h3>4. Contenteditable Div (Google Docs style)</h3>
+        <div class="content-editable" contenteditable="true" 
+             data-placeholder="Click here and type text with grammar errors...">
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>5. Multiple Errors Test</h3>
+        <textarea placeholder="Type multiple errors: 'I are going to store and he have car'"></textarea>
+    </div>
+
+    <script>
+        // Add placeholder behavior for contenteditable
+        const contentEditable = document.querySelector('.content-editable');
+        contentEditable.addEventListener('focus', function() {
+            if (this.textContent === '') {
+                this.textContent = '';
+            }
+        });
+        
+        contentEditable.addEventListener('blur', function() {
+            if (this.textContent.trim() === '') {
+                this.innerHTML = '';
+            }
+        });
+
+        // Console logging for debugging
+        console.log('Test page loaded. Grammar Assistant should initialize...');
+        
+        // Monitor for Grammar Assistant events
+        setTimeout(() => {
+            if (window.grammarAssistant) {
+                console.log('Grammar Assistant found:', window.grammarAssistant);
+            } else {
+                console.log('Grammar Assistant not found on window object');
+            }
+        }, 1000);
+    </script>
 </body>
 </html> 
