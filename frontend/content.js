@@ -218,10 +218,10 @@ class GrammarAssistant {
                 background: white;
                 border-radius: 8px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-                padding: 0;
+                padding: 12px;
                 max-width: 320px;
                 max-height: 300px;
-                overflow: hidden;
+                overflow-y: auto;
                 z-index: 2147483647;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 font-size: 14px;
@@ -230,35 +230,26 @@ class GrammarAssistant {
                 transform: translateY(-10px);
                 transition: all 0.2s ease;
                 pointer-events: none;
-                display: flex;
-                flex-direction: column;
-            }
-            
-            /* Panel content area that scrolls */
-            .panel-content {
-                overflow-y: auto;
-                padding: 0 12px 12px 12px;
-                flex: 1;
                 /* Custom scrollbar styling */
                 scrollbar-width: thin;
                 scrollbar-color: #ccc #f5f5f5;
             }
             
-            .panel-content::-webkit-scrollbar {
+            .grammar-suggestion-panel::-webkit-scrollbar {
                 width: 6px;
             }
             
-            .panel-content::-webkit-scrollbar-track {
+            .grammar-suggestion-panel::-webkit-scrollbar-track {
                 background: #f5f5f5;
                 border-radius: 3px;
             }
             
-            .panel-content::-webkit-scrollbar-thumb {
+            .grammar-suggestion-panel::-webkit-scrollbar-thumb {
                 background: #ccc;
                 border-radius: 3px;
             }
             
-            .panel-content::-webkit-scrollbar-thumb:hover {
+            .grammar-suggestion-panel::-webkit-scrollbar-thumb:hover {
                 background: #999;
             }
             
@@ -271,16 +262,20 @@ class GrammarAssistant {
             .suggestion-header {
                 font-weight: 600;
                 color: #333;
-                margin-bottom: 12px;
+                margin-bottom: 8px;
                 font-size: 13px;
+                position: sticky;
+                top: 0;
                 background: white;
-                padding: 12px;
-                margin: 0;
+                z-index: 10;
+                padding: 8px 0;
+                margin: -12px -12px 8px -12px;
+                padding-left: 12px;
+                padding-right: 12px;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 border-bottom: 1px solid #f0f0f0;
-                border-radius: 8px 8px 0 0;
             }
             
             .suggestion-close-btn {
@@ -303,14 +298,12 @@ class GrammarAssistant {
             }
             
             .suggestion-item {
-                padding: 10px;
+                padding: 8px;
                 border-radius: 4px;
-                margin-bottom: 8px;
+                margin-bottom: 6px;
                 border: 1px solid #e0e0e0;
                 cursor: pointer;
                 transition: all 0.2s ease;
-                position: relative;
-                z-index: 1;
             }
             
             .suggestion-item:hover {
@@ -1165,26 +1158,6 @@ class GrammarAssistant {
                 highlights.forEach(highlight => {
                     this.setupHighlightHover(highlight, element);
                 });
-                
-                // Debug: Check if highlights are still there after a short delay
-                setTimeout(() => {
-                    const stillThere = element.querySelectorAll('.grammar-highlight');
-                    console.log('Grammar Assistant: After 100ms delay, found', stillThere.length, 'highlights still in DOM');
-                    if (stillThere.length === 0) {
-                        console.warn('Grammar Assistant: Highlights were removed shortly after application!');
-                    } else {
-                        // Check if highlights are visible
-                        const firstHighlight = stillThere[0];
-                        const computedStyle = window.getComputedStyle(firstHighlight);
-                        console.log('Grammar Assistant: First highlight CSS:', {
-                            display: computedStyle.display,
-                            visibility: computedStyle.visibility,
-                            opacity: computedStyle.opacity,
-                            borderBottom: computedStyle.borderBottom,
-                            position: computedStyle.position
-                        });
-                    }
-                }, 100);
             } else {
                 console.warn('Grammar Assistant: No changes made to element HTML - highlights not applied');
             }
@@ -1606,15 +1579,7 @@ class GrammarAssistant {
         
         const header = document.createElement('div');
         header.className = 'suggestion-header';
-        header.style.cssText = `
-            position: relative;
-            background: white;
-            padding: 12px;
-            margin: 0;
-            border-bottom: 1px solid #f0f0f0;
-            border-radius: 8px 8px 0 0;
-            z-index: 10;
-        `;
+        header.style.transition = 'all 0.3s ease';
         
         const headerText = document.createElement('span');
         headerText.textContent = `${validSuggestions.length} suggestion${validSuggestions.length !== 1 ? 's' : ''} remaining`;
@@ -1631,19 +1596,6 @@ class GrammarAssistant {
         
         header.appendChild(headerText);
         header.appendChild(closeBtn);
-        
-        // Fix header positioning to prevent covering first suggestion
-        header.style.cssText = `
-            position: relative;
-            background: white;
-            padding: 12px;
-            margin: 0;
-            border-bottom: 1px solid #f0f0f0;
-            border-radius: 8px 8px 0 0;
-            z-index: 10;
-            flex-shrink: 0;
-        `;
-        
         this.suggestionPanel.appendChild(header);
         
         this.addSuggestionItems(element, validSuggestions);
@@ -1705,12 +1657,7 @@ class GrammarAssistant {
                 this.applySuggestion(element, suggestion, suggestion.id); // Pass ID instead of index
             });
             
-            // Append to content wrapper instead of main panel
-            if (this.panelContentWrapper) {
-                this.panelContentWrapper.appendChild(item);
-            } else {
-                this.suggestionPanel.appendChild(item);
-            }
+            this.suggestionPanel.appendChild(item);
         });
     }
 
@@ -1735,27 +1682,12 @@ class GrammarAssistant {
         this.suggestionPanel = document.createElement('div');
         this.suggestionPanel.className = 'grammar-suggestion-panel';
         
-        // Ensure proper positioning styles are set with flexbox layout
-        this.suggestionPanel.style.cssText = `
-            position: absolute;
-            z-index: 2147483647;
-            display: flex;
-            flex-direction: column;
-            max-height: 300px;
-            overflow: hidden;
-        `;
+        // Ensure proper positioning styles are set
+        this.suggestionPanel.style.position = 'absolute';
+        this.suggestionPanel.style.zIndex = '2147483647';
         
         const header = document.createElement('div');
         header.className = 'suggestion-header';
-        header.style.cssText = `
-            position: relative;
-            background: white;
-            padding: 12px;
-            margin: 0;
-            border-bottom: 1px solid #f0f0f0;
-            border-radius: 8px 8px 0 0;
-            z-index: 10;
-        `;
         
         const headerText = document.createElement('span');
         headerText.textContent = `${validSuggestions.length} suggestion${validSuggestions.length !== 1 ? 's' : ''} found`;
@@ -1772,24 +1704,7 @@ class GrammarAssistant {
         
         header.appendChild(headerText);
         header.appendChild(closeBtn);
-        
-        // Create content wrapper for scrollable area
-        const contentWrapper = document.createElement('div');
-        contentWrapper.className = 'panel-content';
-        contentWrapper.style.cssText = `
-            overflow-y: auto;
-            padding: 0 12px 12px 12px;
-            flex: 1;
-            max-height: calc(300px - 60px);
-            scrollbar-width: thin;
-            scrollbar-color: #ccc #f5f5f5;
-        `;
-        
         this.suggestionPanel.appendChild(header);
-        this.suggestionPanel.appendChild(contentWrapper);
-        
-        // Store reference to content wrapper for adding items
-        this.panelContentWrapper = contentWrapper;
         
         this.addSuggestionItems(element, validSuggestions);
         
