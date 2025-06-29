@@ -69,9 +69,16 @@ PROMPTS = {
         "has_errors": true/false
     }}
     
-    Only suggest corrections for actual grammar, spelling, case or punctuation errors. 
-    If the text is already correct, return "has_errors": false with an empty suggestions array.
-    Keep explanations concise and helpful.
+    IMPORTANT RULES:
+    1. Only suggest corrections for actual grammar, spelling, case or punctuation errors
+    2. If the text is already correct, return "has_errors": false with an empty suggestions array
+    3. Keep explanations concise and helpful
+    4. CRITICAL: When correcting punctuation, be precise and do not add redundant punctuation and NEVER remove all punctuation unless it's truly wrong.
+    5. Focus on fixing the actual error, preserve correct punctuation
+    6. When in doubt, preserve existing punctuation rather than removing it
+    7. IMPORTANT: The "corrected_text" will be used EXACTLY to replace the "original_text" in the user's document. Make sure "corrected_text" contains exactly what should appear in the final text, including all necessary punctuation.
+    8. If the change is small just try to keep the necessary word(s) which needs to be changed. for example if only one word is wrong, then just give the correct word. If the change is to add a punctuation, then give it with the last word as needed.
+    9. When there is no lack of context for a sentence, then don't return any suggestion for that.
     """,
     
     "spell_check": """

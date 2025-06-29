@@ -1,1206 +1,2290 @@
-// Grammar Bot Content Script
-class GrammarBot {
+// Grammar Bot Content Script - Grammarly-like Implementation
+class GrammarAssistant {
     constructor() {
-        this.selectedText = '';
-        this.selectionRange = null;
-        this.selectedElement = null; // Store reference to the input/textarea element
-        this.selectionStart = null; // Store selection start position for input elements
-        this.selectionEnd = null; // Store selection end position for input elements
-        this.popup = null;
-        this.isPopupVisible = false;
-        this.features = [];
-        this.isCheckingGrammar = false;
-        this.currentSuggestions = []; // Store current suggestions
-        this.appliedSuggestions = new Set(); // Track applied suggestions
-        this.isApplyingFix = false; // Prevent popup hiding during fix application
-        this.originalSelectedText = null; // Store original text for sequential fixes
-        this.suggestionLengthChanges = new Map(); // Store length changes for each suggestion
-        this.textNodeWrapper = null; // Wrapper for text node fixes
-        this.lastFixAppliedTime = null; // Track when fixes were last applied
+        this.currentElement = null;
+        this.floatingButton = null;
+        this.suggestionPanel = null;
+        this.isAnalyzing = false;
+        this.isApplyingSuggestion = false;  // Flag to prevent triggering analysis during suggestion application
+        this.suggestions = new Map(); // elementId -> suggestions
+        this.debounceTimer = null;
+        this.reanalysisTimer = null;  // Timer for delayed re-analysis after suggestions applied
+        this.isPanelVisible = false;
+        this.userManuallyClosed = false;  // Track if user manually closed panel
+        
+        // Configuration
+        this.config = {
+            debounceDelay: 2000, // Wait 2s after typing stops (increased to reduce immediate calls)
+            minTextLength: 10,
+            buttonOffset: { x: 10, y: 10 },
+            enabledElements: [
+                'textarea', 
+                'input[type="text"]', 
+                // 'input[type="email"]', 
+                // 'input[type="search"]',
+                // 'input[type="password"]',
+                '[contenteditable="true"]', 
+                '[contenteditable=""]',
+                '[contenteditable]',
+                '.docs-textelement-paragraph',  // Google Docs
+                '.notranslate',  // Google Docs text areas
+                '.kix-paragraphrenderer'  // Google Docs paragraphs
+            ]
+        };
         
         this.init();
     }
 
     async init() {
-        // Load features from backend
-        await this.loadFeatures();
+        console.log('Grammar Assistant: Initializing Grammarly-like system...');
+        
+        // Load user settings
+        await this.loadSettings();
+        
+        // Set up global styles
+        this.injectStyles();
         
         // Set up event listeners
-        this.setupEventListeners();
+        this.setupGlobalListeners();
         
-        console.log('Grammar Bot initialized successfully');
-        console.log('Grammar Bot: Available features:', this.features);
-        console.log('Grammar Bot: Extension ready for text selection');
+        // Monitor for text inputs
+        this.startElementMonitoring();
+        
+        console.log('Grammar Assistant: Initialized successfully');
     }
 
-    async loadFeatures() {
+    async loadSettings() {
+        return new Promise((resolve) => {
+            chrome.storage.sync.get(['autoCheck', 'showToasts'], (result) => {
+                this.settings = {
+                    autoCheck: result.autoCheck !== false,
+                    showToasts: result.showToasts !== false
+                };
+                resolve();
+            });
+        });
+    }
+
+    injectStyles() {
+        if (document.getElementById('grammar-assistant-styles')) return;
+        
+        const style = document.createElement('style');
+        style.id = 'grammar-assistant-styles';
+        style.textContent = `
+            /* Grammar Assistant Floating Button */
+            .grammar-floating-btn {
+                position: absolute;
+                width: 28px;
+                height: 28px;
+                background: #1DB584;
+                border: 2px solid #ffffff;
+                border-radius: 50%;
+                cursor: pointer;
+                z-index: 2147483647;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 14px;
+                color: white;
+                font-weight: bold;
+                transition: all 0.2s ease;
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            
+            .grammar-floating-btn.visible {
+                opacity: 1;
+                transform: scale(1);
+            }
+            
+            .grammar-floating-btn:hover {
+                background: #16A085;
+                transform: scale(1.1);
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            }
+            
+            .grammar-floating-btn.analyzing {
+                background: #F39C12;
+                animation: pulse 1.5s infinite;
+            }
+            
+            @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+            }
+            
+            /* Grammarly-style Highlights */
+            .grammar-highlight {
+                position: relative;
+                border-bottom: 2px solid #FFD700;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                background: transparent;
+            }
+            
+            .grammar-highlight:hover {
+                background: rgba(255, 215, 0, 0.1);
+                border-bottom-color: #FFA500;
+            }
+            
+            /* Hover suggestion tooltip - matching main popup style */
+            .grammar-suggestion-tooltip {
+                position: absolute;
+                background: white;
+                color: #333;
+                padding: 12px;
+                border-radius: 8px;
+                font-size: 14px;
+                line-height: 1.4;
+                z-index: 2147483647;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+                max-width: 280px;
+                opacity: 0;
+                transform: translateY(-5px);
+                transition: all 0.2s ease;
+                pointer-events: none;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+            
+            .grammar-suggestion-tooltip.visible {
+                opacity: 1;
+                transform: translateY(0);
+                pointer-events: auto;
+            }
+            
+            .grammar-suggestion-tooltip::after {
+                content: '';
+                position: absolute;
+                top: 100%;
+                left: 50%;
+                transform: translateX(-50%);
+                border: 8px solid transparent;
+                border-top-color: white;
+            }
+            
+            .tooltip-suggestion {
+                margin-bottom: 8px;
+                font-size: 14px;
+            }
+            
+            .tooltip-original {
+                color: #E74C3C;
+                font-weight: 500;
+                /* Removed line-through - just color is enough */
+            }
+            
+            .tooltip-arrow {
+                color: #666;
+                margin: 0 8px;
+                font-weight: bold;
+            }
+            
+            .tooltip-corrected {
+                color: #27AE60;
+                font-weight: 500;
+            }
+            
+            .tooltip-explanation {
+                color: #666;
+                font-size: 13px;
+                margin-bottom: 10px;
+                line-height: 1.4;
+            }
+            
+            .tooltip-apply {
+                background: linear-gradient(135deg, #27AE60, #229954);
+                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                display: inline-block;
+                transition: all 0.2s ease;
+                border: none;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            .tooltip-apply:hover {
+                background: linear-gradient(135deg, #229954, #1E8449);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            }
+            
+            /* Suggestion Panel */
+            .grammar-suggestion-panel {
+                position: absolute;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+                padding: 0;
+                max-width: 320px;
+                max-height: 300px;
+                overflow: hidden;
+                z-index: 2147483647;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-size: 14px;
+                line-height: 1.4;
+                opacity: 0;
+                transform: translateY(-10px);
+                transition: all 0.2s ease;
+                pointer-events: none;
+                display: flex;
+                flex-direction: column;
+            }
+            
+            /* Panel content area that scrolls */
+            .panel-content {
+                overflow-y: auto;
+                padding: 0 12px 12px 12px;
+                flex: 1;
+                /* Custom scrollbar styling */
+                scrollbar-width: thin;
+                scrollbar-color: #ccc #f5f5f5;
+            }
+            
+            .panel-content::-webkit-scrollbar {
+                width: 6px;
+            }
+            
+            .panel-content::-webkit-scrollbar-track {
+                background: #f5f5f5;
+                border-radius: 3px;
+            }
+            
+            .panel-content::-webkit-scrollbar-thumb {
+                background: #ccc;
+                border-radius: 3px;
+            }
+            
+            .panel-content::-webkit-scrollbar-thumb:hover {
+                background: #999;
+            }
+            
+            .grammar-suggestion-panel.visible {
+                opacity: 1;
+                transform: translateY(0);
+                pointer-events: auto;
+            }
+            
+            .suggestion-header {
+                font-weight: 600;
+                color: #333;
+                margin-bottom: 12px;
+                font-size: 13px;
+                background: white;
+                padding: 12px;
+                margin: 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #f0f0f0;
+                border-radius: 8px 8px 0 0;
+            }
+            
+            .suggestion-close-btn {
+                background: none;
+                border: none;
+                color: #999;
+                cursor: pointer;
+                font-size: 16px;
+                padding: 2px 4px;
+                border-radius: 3px;
+                transition: all 0.2s ease;
+                line-height: 1;
+                margin-left: 8px;
+                flex-shrink: 0;
+            }
+            
+            .suggestion-close-btn:hover {
+                background: #f0f0f0;
+                color: #666;
+            }
+            
+            .suggestion-item {
+                padding: 10px;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                border: 1px solid #e0e0e0;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                position: relative;
+                z-index: 1;
+            }
+            
+            .suggestion-item:hover {
+                background: #f5f5f5;
+                border-color: #1DB584;
+            }
+            
+            .suggestion-text {
+                font-weight: 500;
+                color: #1DB584;
+                margin-bottom: 4px;
+            }
+            
+            .suggestion-reason {
+                font-size: 12px;
+                color: #666;
+            }
+            
+            /* Input Field Indicators */
+            .grammar-monitored {
+                position: relative;
+            }
+            
+            .grammar-status-indicator {
+                position: absolute;
+                bottom: 4px;
+                right: 4px;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #1DB584;
+                z-index: 10;
+                opacity: 0.7;
+            }
+            
+            .grammar-status-indicator.analyzing {
+                background: #F39C12;
+                animation: pulse 1s infinite;
+            }
+            
+            .grammar-status-indicator.has-suggestions {
+                background: #E74C3C;
+            }
+        `;
+        
+        document.head.appendChild(style);
+    }
+
+    setupGlobalListeners() {
+        // Listen for focus on text inputs
+        document.addEventListener('focusin', (e) => this.handleElementFocus(e), true);
+        document.addEventListener('focusout', (e) => this.handleElementBlur(e), true);
+        
+        // Listen for clicks to hide panels (use capture to catch clicks before they're stopped)
+        document.addEventListener('click', (e) => this.handleGlobalClick(e), true);
+        
+        // Listen for scroll to update button position
+        document.addEventListener('scroll', () => this.updateButtonPosition(), true);
+        
+        // Listen for resize
+        window.addEventListener('resize', () => this.updateButtonPosition());
+        
+        // Listen for settings changes
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            if (request.action === 'updateSettings') {
+                this.settings = { ...this.settings, ...request.settings };
+            }
+        });
+    }
+
+    startElementMonitoring() {
+        // Find all existing text inputs
+        this.scanForTextInputs();
+        
+        // Set up mutation observer for new elements
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        this.scanForTextInputs(node);
+                    }
+                });
+            });
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    scanForTextInputs(container = document) {
+        const selector = this.config.enabledElements.join(', ');
+        const elements = container.querySelectorAll ? container.querySelectorAll(selector) : [];
+        
+        elements.forEach(element => this.setupElementMonitoring(element));
+        
+        // Also check if container itself is a text input
+        if (container.matches && container.matches(selector)) {
+            this.setupElementMonitoring(container);
+        }
+    }
+
+    setupElementMonitoring(element) {
+        if (element.grammarAssistantSetup) return;
+        
+        element.grammarAssistantSetup = true;
+        element.classList.add('grammar-monitored');
+        
+        // Skip status indicator for now to avoid issues
+        
+        // Set up text change monitoring
+        let lastContent = this.getElementText(element);
+        
+        const checkForChanges = () => {
+            const currentContent = this.getElementText(element);
+            if (currentContent !== lastContent) {
+                console.log('Grammar Assistant: Text change detected', {
+                    oldLength: lastContent.length,
+                    newLength: currentContent.length,
+                    isApplyingSuggestion: this.isApplyingSuggestion,
+                    minTextLength: this.config.minTextLength
+                });
+                
+                // Don't clear suggestions if we're currently applying a suggestion
+                if (!this.isApplyingSuggestion) {
+                    // Clear highlights when content changes
+                    this.clearHighlights(element);
+                    
+                    // Clear stored suggestions for this element
+                    const elementId = this.getElementId(element);
+                    this.suggestions.delete(elementId);
+                }
+                
+                lastContent = currentContent;
+                
+                if (currentContent.length >= this.config.minTextLength) {
+                    console.log('Grammar Assistant: Text length sufficient, queuing analysis');
+                    this.queueTextAnalysis(element, currentContent);
+                } else {
+                    console.log('Grammar Assistant: Text too short for analysis');
+                    if (!this.isApplyingSuggestion) {
+                        this.updateElementIndicator(element, 'clean');
+                        this.updateButtonState('complete', 0);
+                    }
+                }
+            } else {
+                console.log('Grammar Assistant: No text change detected');
+            }
+        };
+        
+        // Listen for various text change events
+        element.addEventListener('input', checkForChanges);
+        element.addEventListener('paste', () => setTimeout(checkForChanges, 100));
+        element.addEventListener('keyup', checkForChanges);
+        
+        console.log('Grammar Assistant: Set up monitoring for element', element.tagName);
+    }
+
+    handleElementFocus(e) {
+        const element = e.target;
+        if (!this.isTextInput(element)) return;
+        
+        this.currentElement = element;
+        this.showFloatingButton(element);
+        
+        // Load existing suggestions for this element
+        this.loadElementSuggestions(element);
+        
+        console.log('Grammar Assistant: Text input focused', element.tagName);
+    }
+
+    handleElementBlur(e) {
+        // Don't hide immediately - user might click the button
+        setTimeout(() => {
+            if (!this.isInteractingWithAssistant() && !this.isApplyingSuggestion) {
+                this.hideFloatingButton();
+            }
+        }, 150);
+    }
+
+    isTextInput(element) {
+        return this.config.enabledElements.some(selector => {
+            try {
+                return element.matches(selector);
+            } catch (e) {
+                return false;
+            }
+        });
+    }
+
+    getElementText(element) {
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            return element.value;
+        } else if (element.contentEditable === 'true') {
+            return element.textContent || element.innerText || '';
+        }
+        return '';
+    }
+
+    setElementText(element, text) {
+        if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            element.value = text;
+        } else if (element.contentEditable === 'true') {
+            // For contenteditable, preserve HTML formatting by only replacing text content
+            this.preserveFormattingTextReplace(element, text);
+        }
+        
+        // Trigger input event
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    preserveFormattingTextReplace(element, newText) {
+        // Get the current plain text content
+        const currentText = element.textContent || element.innerText || '';
+        
+        console.log('Grammar Assistant: preserveFormattingTextReplace called');
+        console.log('Grammar Assistant: currentText:', JSON.stringify(currentText));
+        console.log('Grammar Assistant: newText:', JSON.stringify(newText));
+        console.log('Grammar Assistant: element HTML before:', element.innerHTML);
+        
+        // If the text is the same, no need to replace
+        if (currentText === newText) {
+            console.log('Grammar Assistant: Text is the same, no replacement needed');
+            return;
+        }
+        
+        // Try to use a more sophisticated approach: find and replace specific text changes
+        // while preserving the DOM structure
+        if (this.smartTextReplace(element, currentText, newText)) {
+            console.log('Grammar Assistant: Smart text replace succeeded');
+            console.log('Grammar Assistant: element HTML after:', element.innerHTML);
+            return;
+        }
+        
+        // Fallback: if we can't do selective replacement, use textContent
+        // This will lose formatting but at least the text will be correct
+        console.warn('Grammar Assistant: Could not preserve formatting, falling back to textContent replacement');
+        element.textContent = newText;
+    }
+
+    smartTextReplace(element, currentText, newText) {
+        // Find what changed between the old and new text
+        const changes = this.findTextChanges(currentText, newText);
+        
+        if (changes.length === 0) {
+            return false;
+        }
+        
+        console.log('Grammar Assistant: Found changes:', changes);
+        
+        // For each change, try to find it in the DOM and replace it
+        for (const change of changes) {
+            if (!this.applyChangeToDOM(element, change)) {
+                console.warn('Grammar Assistant: Could not apply change to DOM:', change);
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
+    applyChangeToDOM(element, change) {
+        // Walk through all text nodes and find the one containing our change
+        const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+        
+        let currentPos = 0;
+        let node;
+        
+        while (node = walker.nextNode()) {
+            const nodeText = node.textContent;
+            const nodeStart = currentPos;
+            const nodeEnd = currentPos + nodeText.length;
+            
+            // Check if this change starts within this text node
+            if (change.start >= nodeStart && change.start < nodeEnd) {
+                const relativeStart = change.start - nodeStart;
+                const relativeEnd = Math.min(change.end - nodeStart, nodeText.length);
+                
+                // Check if the text we're looking for actually matches
+                const textToReplace = nodeText.substring(relativeStart, relativeEnd);
+                
+                if (textToReplace === change.oldText) {
+                    // Replace the text within this node
+                    const beforeText = nodeText.substring(0, relativeStart);
+                    const afterText = nodeText.substring(relativeEnd);
+                    const newNodeText = beforeText + change.newText + afterText;
+                    
+                    console.log('Grammar Assistant: Replacing in text node:', {
+                        oldNodeText: nodeText,
+                        newNodeText: newNodeText,
+                        textToReplace: textToReplace,
+                        replacement: change.newText
+                    });
+                    
+                    node.textContent = newNodeText;
+                    return true;
+            } else {
+                    console.warn('Grammar Assistant: Text mismatch in node:', {
+                        expected: change.oldText,
+                        found: textToReplace,
+                        nodeText: nodeText
+                    });
+                }
+            }
+            
+            currentPos = nodeEnd;
+        }
+        
+        return false;
+    }
+
+    findTextChanges(oldText, newText) {
+        // Simple approach: find the first difference and create a replacement
+        // This works well for single word/phrase corrections
+        
+        let startDiff = 0;
+        let endDiff = 0;
+        
+        // Find where the texts start to differ
+        while (startDiff < oldText.length && startDiff < newText.length && 
+               oldText[startDiff] === newText[startDiff]) {
+            startDiff++;
+        }
+        
+        // Find where the texts end differently (working backwards)
+        while (endDiff < (oldText.length - startDiff) && 
+               endDiff < (newText.length - startDiff) &&
+               oldText[oldText.length - 1 - endDiff] === newText[newText.length - 1 - endDiff]) {
+            endDiff++;
+        }
+        
+        // If no differences found, return empty changes
+        if (startDiff === oldText.length && newText.length === oldText.length) {
+            return [];
+        }
+        
+        // Extract the changed portion
+        const oldPortion = oldText.substring(startDiff, oldText.length - endDiff);
+        const newPortion = newText.substring(startDiff, newText.length - endDiff);
+        
+        return [{
+            start: startDiff,
+            end: oldText.length - endDiff,
+            oldText: oldPortion,
+            newText: newPortion
+        }];
+    }
+
+    showFloatingButton(element) {
+        if (!this.floatingButton) {
+            this.createFloatingButton();
+        }
+        
+        // Check for existing suggestions for this element and update button state accordingly
+        const elementId = this.getElementId(element);
+        const existingSuggestions = this.suggestions.get(elementId);
+        
+        // Preserve visible state before updating
+        const wasVisible = this.floatingButton.classList.contains('visible');
+        console.log('Grammar Assistant: showFloatingButton - wasVisible:', wasVisible, 'className before:', this.floatingButton.className);
+        
+        if (existingSuggestions && existingSuggestions.length > 0) {
+            // Update button to show count
+            this.updateButtonState('complete', existingSuggestions.length);
+        } else {
+            // Only set default text if no suggestions exist
+            this.floatingButton.textContent = '✓';
+            this.floatingButton.style.backgroundColor = '#4CAF50';  // Green for no issues
+        }
+        
+        // Always preserve existing classes - never reset className completely
+        console.log('Grammar Assistant: Ensuring base class is present without removing other classes');
+        if (!this.floatingButton.classList.contains('grammar-floating-btn')) {
+            this.floatingButton.classList.add('grammar-floating-btn');
+        }
+        
+        console.log('Grammar Assistant: showFloatingButton - className after updates:', this.floatingButton.className);
+        this.positionFloatingButton(element);
+        
+        // Show with animation only if not already visible
+        if (!wasVisible) {
+            setTimeout(() => {
+                this.floatingButton.classList.add('visible');
+            }, 10);
+        }
+    }
+
+    createFloatingButton() {
+        this.floatingButton = document.createElement('div');
+        this.floatingButton.className = 'grammar-floating-btn';
+        this.floatingButton.textContent = '✓';
+        this.floatingButton.title = 'Grammar Assistant';
+        
+        this.floatingButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+            this.handleButtonClick();
+        });
+        
+        // Debug: Monitor when button loses visibility
+        const buttonObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                    const hasVisible = this.floatingButton.classList.contains('visible');
+                    if (!hasVisible && this.currentElement) {
+                        console.warn('Grammar Assistant: Button lost visible class!', {
+                            currentElement: !!this.currentElement,
+                            isApplyingSuggestion: this.isApplyingSuggestion,
+                            className: this.floatingButton.className,
+                            stackTrace: new Error().stack
+                        });
+                        // Force it back to visible if we have a current element
+                        if (this.currentElement) {
+                            setTimeout(() => {
+                                if (this.floatingButton && this.currentElement) {
+                                    this.floatingButton.classList.add('visible');
+                                    console.log('Grammar Assistant: Forced button back to visible');
+                                }
+                            }, 10);
+                        }
+                    }
+                }
+            });
+        });
+        
+        buttonObserver.observe(this.floatingButton, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
+        
+        document.body.appendChild(this.floatingButton);
+    }
+
+    positionFloatingButton(element) {
+        if (!element || !this.floatingButton) return;
+        
+        const rect = element.getBoundingClientRect();
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        
+        // Position at bottom-right of the input
+        const left = rect.right - 38 + scrollX;
+        const top = rect.bottom - 38 + scrollY;
+        
+        this.floatingButton.style.left = `${left}px`;
+        this.floatingButton.style.top = `${top}px`;
+    }
+
+    updateButtonPosition() {
+        if (this.currentElement && this.floatingButton && this.floatingButton.classList.contains('visible')) {
+            this.positionFloatingButton(this.currentElement);
+        }
+    }
+
+    hideFloatingButton() {
+        // Don't hide button if we're currently applying a suggestion
+        if (this.isApplyingSuggestion) {
+            console.log('Grammar Assistant: Skipping hide button - currently applying suggestion');
+            return;
+        }
+        
+        // Don't hide if we're analyzing or have suggestions showing
+        if (this.currentElement && (this.isAnalyzing || this.isPanelVisible)) {
+            console.log('Grammar Assistant: Skipping hide button - currently analyzing or panel visible');
+            return;
+        }
+        
+        // Don't hide if there's still a focused text input (element switching)
+        const activeElement = document.activeElement;
+        if (activeElement && this.isTextInput(activeElement)) {
+            console.log('Grammar Assistant: Skipping hide button - another text input is focused');
+            return;
+        }
+        
+        // Don't hide if user is still interacting with our components
+        if (this.isInteractingWithAssistant()) {
+            console.log('Grammar Assistant: Skipping hide button - user interacting with assistant');
+            return;
+        }
+        
+        console.log('Grammar Assistant: Hiding button - all conditions met');
+        if (this.floatingButton) {
+            this.floatingButton.classList.remove('visible');
+        }
+        this.hideSuggestionPanel();
+    }
+
+    handleButtonClick() {
+        console.log('Grammar Assistant: Button clicked!');
+        
+        if (!this.currentElement) {
+            console.log('Grammar Assistant: No current element');
+            return;
+        }
+        
+        // Toggle panel visibility
+        if (this.isPanelVisible) {
+            console.log('Grammar Assistant: Toggling panel - hiding');
+            this.hideSuggestionPanel();
+            this.userManuallyClosed = true;  // User manually closed
+            return;
+        }
+        
+        const text = this.getElementText(this.currentElement);
+        console.log('Grammar Assistant: Current text:', text);
+        
+        if (text.length < this.config.minTextLength) {
+            this.showToast('Please enter more text to analyze', 'info');
+            return;
+        }
+        
+        // Check if we have existing suggestions
+        const elementId = this.getElementId(this.currentElement);
+        const existingSuggestions = this.suggestions.get(elementId);
+        
+        console.log('Grammar Assistant: Existing suggestions:', existingSuggestions);
+        
+        if (existingSuggestions && existingSuggestions.length > 0) {
+            console.log('Grammar Assistant: Showing existing suggestions panel');
+            this.showSuggestionPanel(this.currentElement, existingSuggestions);
+            this.userManuallyClosed = false;  // Reset since user manually opened
+            } else {
+            console.log('Grammar Assistant: No existing suggestions, analyzing text');
+            this.userManuallyClosed = false;  // Reset for new analysis
+            this.analyzeText(this.currentElement, text, true); // true = allow auto-show panel for manual analysis
+        }
+    }
+
+    queueTextAnalysis(element, text) {
+        console.log('Grammar Assistant: queueTextAnalysis called', {
+            autoCheck: this.settings.autoCheck,
+            isApplyingSuggestion: this.isApplyingSuggestion,
+            textLength: text.length,
+            debounceDelay: this.config.debounceDelay
+        });
+        
+        if (!this.settings.autoCheck) {
+            console.log('Grammar Assistant: Auto-check is disabled, skipping analysis');
+            return;
+        }
+        
+        // Don't queue analysis if we're currently applying a suggestion
+        if (this.isApplyingSuggestion) {
+            console.log('Grammar Assistant: Skipping text analysis - currently applying suggestion');
+            return;
+        }
+        
+        // Clear existing timer
+        if (this.debounceTimer) {
+            console.log('Grammar Assistant: Clearing existing debounce timer');
+            clearTimeout(this.debounceTimer);
+        }
+        
+        // Set new timer
+        console.log('Grammar Assistant: Setting new debounce timer for', this.config.debounceDelay, 'ms');
+        this.debounceTimer = setTimeout(() => {
+            console.log('Grammar Assistant: Debounce timer fired, starting analysis');
+            this.analyzeText(element, text, false); // false = don't auto-show panel
+        }, this.config.debounceDelay);
+    }
+
+    queueDelayedReanalysis(element, delay = 3000) {
+        // Clear existing reanalysis timer
+        if (this.reanalysisTimer) {
+            clearTimeout(this.reanalysisTimer);
+        }
+        
+        // Set new timer for delayed re-analysis
+        this.reanalysisTimer = setTimeout(() =>  {
+            const currentText = this.getElementText(element);
+            if (currentText && currentText.length >= this.config.minTextLength) {
+                console.log(`Grammar Assistant: Running delayed re-analysis (${delay}ms delay)`);
+                this.analyzeText(element, currentText, false); // Don't auto-show panel for verification
+            }
+        }, delay);
+        
+        console.log(`Grammar Assistant: Queued delayed re-analysis (${delay}ms delay)`);
+    }
+
+    async analyzeText(element, text, allowAutoShowPanel = false) {
+        if (this.isAnalyzing) return;
+        
+        this.isAnalyzing = true;
+        this.updateButtonState('analyzing');
+        this.updateElementIndicator(element, 'analyzing');
+        
         try {
-            // Use background script proxy to avoid CORS issues
+            console.log('Grammar Assistant: Analyzing text...', text.substring(0, 50));
+            
+            // Split into sentences
+            const sentences = this.splitIntoSentences(text);
+            console.log('Grammar Assistant: Split into', sentences.length, 'sentences');
+            
+            // Analyze with backend
             const response = await chrome.runtime.sendMessage({
-                action: 'loadFeatures'
+                action: 'checkGrammar',
+                data: { text, feature: 'grammar_check' }
             });
             
             if (response.error) {
                 throw new Error(response.error);
             }
             
-            this.features = response.features.filter(f => f.enabled);
+            // Process suggestions
+            console.log('Grammar Assistant: Raw suggestions from backend:', response.suggestions);
+            const suggestions = this.processSuggestions(response.suggestions || []);
+            console.log('Grammar Assistant: Processed suggestions:', suggestions);
+            
+            // Store suggestions FIRST, before showing panel
+            const elementId = this.getElementId(element);
+            console.log('Grammar Assistant: Storing suggestions for element:', elementId, 'Count:', suggestions.length);
+            console.log('Grammar Assistant: Suggestions being stored:', suggestions.map(s => ({ id: s.id, original: s.original, suggestion: s.suggestion })));
+            this.suggestions.set(elementId, suggestions);
+            
+            // Apply highlights
+            if (suggestions.length > 0) {
+                console.log('Grammar Assistant: About to apply highlights for', suggestions.length, 'suggestions');
+                this.applyHighlights(element, suggestions);
+                console.log('Grammar Assistant: Finished applying highlights');
+            } else {
+                console.log('Grammar Assistant: No suggestions to highlight');
+            }
+            
+            // Update UI
+            this.updateButtonState('complete', suggestions.length);
+            this.updateElementIndicator(element, suggestions.length > 0 ? 'has-suggestions' : 'clean');
+            
+            // Show panel if allowed and there are suggestions
+            if (suggestions.length > 0 && allowAutoShowPanel && !this.userManuallyClosed) {
+                this.showSuggestionPanel(element, suggestions);
+            }
+            
+            console.log('Grammar Assistant: Analysis complete, found', suggestions.length, 'suggestions');
+            
         } catch (error) {
-            console.error('Failed to load features:', error);
-            // Fallback to default features
-            this.features = [{
-                id: 'grammar_check',
-                name: 'Grammar Check',
-                description: 'Check for grammar and spelling errors',
-                icon: '✓',
-                enabled: true
-            }];
+            console.error('Grammar Assistant: Analysis failed:', error);
+            this.showToast('Analysis failed. Please try again.', 'error');
+            this.updateButtonState('error');
+            this.updateElementIndicator(element, 'error');
+        } finally {
+            this.isAnalyzing = false;
         }
     }
 
-    setupEventListeners() {
-        // Listen for text selection
-        document.addEventListener('mouseup', (e) => this.handleTextSelection(e));
-        document.addEventListener('keyup', (e) => this.handleTextSelection(e));
+    splitIntoSentences(text) {
+        // Simple sentence splitting - can be enhanced
+        return text.match(/[^\.!?]+[\.!?]+/g) || [text];
+    }
+
+    processSuggestions(rawSuggestions) {
+        if (!Array.isArray(rawSuggestions)) {
+            console.warn('Grammar Assistant: rawSuggestions is not an array:', rawSuggestions);
+            return [];
+        }
         
-        // Hide popup when clicking elsewhere
-        document.addEventListener('click', (e) => {
-            // Only process if we have a popup and it's not during grammar checking
-            if (!this.popup || this.isCheckingGrammar) {
-                return;
+        return rawSuggestions.map((suggestion, index) => {
+            console.log('Grammar Assistant: Processing suggestion', index, ':', suggestion);
+            console.log('Grammar Assistant: Available fields:', Object.keys(suggestion));
+            
+            const explanation = suggestion.explanation || suggestion.message || '';
+            let original = suggestion.original_text || suggestion.original || suggestion.text || '';
+            let replacementText = suggestion.corrected_text || suggestion.suggestion || suggestion.replacement || suggestion.corrected || '';
+            
+            console.log('Grammar Assistant: Extracted original:', original, 'replacement:', replacementText);
+            
+            // If we don't have original/replacement, try to extract from explanation
+            if (!original || !replacementText) {
+                console.log('Grammar Assistant: Missing original/replacement, extracting from explanation');
+                const extracted = this.extractReplacementFromExplanation(explanation);
+                console.log('Grammar Assistant: Extraction result:', extracted);
+                if (extracted.original) original = extracted.original;
+                if (extracted.replacement) replacementText = extracted.replacement;
+                console.log('Grammar Assistant: Final original/replacement:', original, '→', replacementText);
             }
             
-            // Check if click is outside popup
-            if (!this.popup.contains(e.target)) {
-                // Prevent hiding popup too quickly after creation
-                const timeSinceCreation = this.popupCreatedTime ? Date.now() - this.popupCreatedTime : Infinity;
-                if (timeSinceCreation < 500) {
-                    console.log('Grammar Bot: Ignoring click event - popup just created');
-                    return;
-                }
-                
-                console.log('Grammar Bot: Hiding popup due to click outside');
-                this.hidePopup();
-            }
-        });
-
-
-
-        // Temporarily disable scroll-based hiding to debug visibility issues
-        // TODO: Re-enable with proper debouncing after popup visibility is confirmed
-        /*
-        document.addEventListener('scroll', () => {
-            if (this.isPopupVisible && !this.isCheckingGrammar) {
-                console.log('Grammar Bot: Hiding popup due to scroll');
-                this.hidePopup();
-            }
-        });
-        */
-    }
-
-    handleTextSelection(e) {
-        setTimeout(() => {
-            // Don't interfere if we're checking grammar or applying fixes
-            if (this.isCheckingGrammar || this.isApplyingFix) {
-                console.log('Grammar Bot: Ignoring text selection change during grammar check or fix application');
-                return;
-            }
-
-            // Prevent immediate re-triggering after fixes were applied
-            if (this.lastFixAppliedTime && Date.now() - this.lastFixAppliedTime < 3000) {
-                console.log('Grammar Bot: Ignoring text selection - fixes were recently applied');
-                return;
-            }
-
-            // Don't reset state if we have an active popup with applied suggestions
-            // This prevents losing state between sequential fix applications
-            if (this.isPopupVisible && this.appliedSuggestions.size > 0) {
-                console.log('Grammar Bot: Preserving state - popup visible with', this.appliedSuggestions.size, 'applied suggestions');
-                return;
-            }
-
-            console.log('Grammar Bot: Resetting selection state for new text selection');
-            console.log('Grammar Bot: Previous state - selectedElement:', !!this.selectedElement, 'appliedSuggestions:', this.appliedSuggestions.size);
-
-            // Reset selection data
-            this.selectedElement = null;
-            this.selectionStart = null;
-            this.selectionEnd = null;
-            this.selectionRange = null;
-            this.originalSelectedText = null; // Reset original text for new selection
-            this.suggestionLengthChanges.clear(); // Reset length change tracking
-            this.appliedSuggestions.clear(); // Reset applied suggestions for new selection
+            const startIndex = suggestion.start || suggestion.startIndex || 0;
+            const originalLength = original.length;
+            const endIndex = suggestion.end || suggestion.endIndex || (startIndex + originalLength);
             
-            // Clean up text node wrapper if it exists
-            if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
-                // Replace wrapper with its contents
-                const parent = this.textNodeWrapper.parentNode;
-                while (this.textNodeWrapper.firstChild) {
-                    parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
-                }
-                parent.removeChild(this.textNodeWrapper);
-                console.log('Grammar Bot: Cleaned up previous text node wrapper');
-            }
-            this.textNodeWrapper = null;
-
-            const activeElement = document.activeElement;
-            let selectedText = '';
-
-            // Handle input and textarea elements
-            if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-                const start = activeElement.selectionStart;
-                const end = activeElement.selectionEnd;
-                if (start !== end) {
-                    selectedText = activeElement.value.substring(start, end).trim();
-                    // Store element and selection positions
-                    this.selectedElement = activeElement;
-                    this.selectionStart = start;
-                    this.selectionEnd = end;
-                }
-            } else {
-                // Handle regular text selections
-                const selection = window.getSelection();
-                selectedText = selection.toString().trim();
-                if (selectedText && selectedText.length > 0) {
-                    this.selectionRange = selection.getRangeAt(0);
-                }
-            }
-
-            if (selectedText && selectedText.length > 3) {
-                this.selectedText = selectedText;
-                console.log('Grammar Bot: Valid text selection detected:', selectedText.substring(0, 50) + '...');
-                // Use a small delay to ensure DOM is stable
-                setTimeout(() => {
-                    this.showPopup(e);
-                }, 50);
-            } else if (this.isPopupVisible && !this.isCheckingGrammar && !this.isApplyingFix) {
-                // Prevent hiding popup too quickly after creation
-                const timeSinceCreation = this.popupCreatedTime ? Date.now() - this.popupCreatedTime : Infinity;
-                if (timeSinceCreation < 500) {
-                    console.log('Grammar Bot: Ignoring selection change - popup just created');
-                    return;
-                }
-                
-                console.log('Grammar Bot: Hiding popup due to no valid text selection');
-                this.hidePopup();
-            }
-        }, 100);
+            const processed = {
+                id: `suggestion-${Date.now()}-${index}`,
+                type: this.determineSuggestionType(explanation),
+                original: original,
+                suggestion: replacementText,
+                explanation: explanation,
+                confidence: suggestion.confidence || 0.8,
+                startIndex: startIndex,
+                endIndex: endIndex
+            };
+            
+            console.log('Grammar Assistant: Processed suggestion:', processed);
+            return processed;
+        });
     }
 
-    showPopup(e) {
-        // Force cleanup of any existing popups first
-        this.forceCleanupPopups();
+    extractReplacementFromExplanation(explanation) {
+        console.log('Grammar Assistant: Extracting from explanation:', explanation);
+        
+        const result = { original: '', replacement: '' };
+        const lowerExplanation = explanation.toLowerCase();
+        
+        // Extract quoted words
+        const quotedWords = explanation.match(/"([^"]+)"/g) || explanation.match(/'([^']+)'/g) || [];
+        console.log('Grammar Assistant: Found quoted words:', quotedWords);
+        
+        // Pattern 1: "The word 'X' should be singular" OR "X is plural but should be singular"
+        if (lowerExplanation.includes('should be singular') || 
+            (lowerExplanation.includes('is plural') && lowerExplanation.includes('subject is singular'))) {
+            if (quotedWords.length > 0) {
+                const word = quotedWords[0].replace(/['"]/g, '');
+                result.original = word;
+                result.replacement = this.makeSingular(word);
+            }
+        }
+        // Pattern 2: "The word 'X' should be plural" OR "X is singular but should be plural"
+        else if (lowerExplanation.includes('should be plural') ||
+                (lowerExplanation.includes('is singular') && lowerExplanation.includes('subject is plural'))) {
+            if (quotedWords.length > 0) {
+                const word = quotedWords[0].replace(/['"]/g, '');
+                result.original = word;
+                result.replacement = this.makePlural(word);
+            }
+        }
+        // Pattern 3: Verb agreement with singular subjects
+        else if ((lowerExplanation.includes('verb should agree') || lowerExplanation.includes('subject-verb agreement')) 
+                && lowerExplanation.includes('singular')) {
+            // Common verb agreement fixes
+            if (lowerExplanation.includes("'it'") || lowerExplanation.includes('"it"') ||
+                lowerExplanation.includes("'he'") || lowerExplanation.includes('"he"') ||
+                lowerExplanation.includes("'she'") || lowerExplanation.includes('"she"')) {
+                result.original = 'have';
+                result.replacement = 'has';
+            }
+        }
+        // Pattern 4: Verb agreement with plural subjects
+        else if ((lowerExplanation.includes('verb should agree') || lowerExplanation.includes('subject-verb agreement'))
+                && lowerExplanation.includes('plural')) {
+            result.original = 'has';
+            result.replacement = 'have';
+        }
+        // Pattern 5: Look for "should be" patterns
+        else if (lowerExplanation.includes('should be')) {
+            const match = explanation.match(/'([^']+)'\s+should be\s+'([^']+)'/i) || 
+                         explanation.match(/"([^"]+)"\s+should be\s+"([^"]+)"/i);
+            if (match) {
+                result.original = match[1];
+                result.replacement = match[2];
+            }
+        }
+        // Pattern 6: Generic fallback - if we have quoted words, make educated guesses
+        else if (quotedWords.length > 0) {
+            const word = quotedWords[0].replace(/['"]/g, '');
+            result.original = word;
+            
+            // Make smart guesses based on context
+            if (lowerExplanation.includes('plural') && lowerExplanation.includes('singular')) {
+                // Word is plural but should be singular
+                result.replacement = this.makeSingular(word);
+            } else if (lowerExplanation.includes('singular') && lowerExplanation.includes('plural')) {
+                // Word is singular but should be plural
+                result.replacement = this.makePlural(word);
+            } else if (lowerExplanation.includes('agreement') || lowerExplanation.includes('agree')) {
+                // Verb agreement issue
+                if (word === 'have') result.replacement = 'has';
+                else if (word === 'has') result.replacement = 'have';
+                else if (word === 'are') result.replacement = 'is';
+                else if (word === 'is') result.replacement = 'are';
+            }
+        }
+        
+        console.log('Grammar Assistant: Extracted replacement:', result);
+        return result;
+    }
 
-        const rect = this.getSelectionPosition();
-        if (!rect) {
-            console.log('Grammar Bot: No selection position found');
+    makeSingular(word) {
+        // Simple singularization rules
+        if (word.endsWith('ies')) return word.slice(0, -3) + 'y';
+        if (word.endsWith('es')) return word.slice(0, -2);
+        if (word.endsWith('s')) return word.slice(0, -1);
+        return word;
+    }
+
+    makePlural(word) {
+        // Simple pluralization rules
+        if (word.endsWith('y')) return word.slice(0, -1) + 'ies';
+        if (word.endsWith('s') || word.endsWith('x') || word.endsWith('z') || 
+            word.endsWith('ch') || word.endsWith('sh')) return word + 'es';
+        return word + 's';
+    }
+
+    determineSuggestionType(explanation) {
+        if (explanation.toLowerCase().includes('grammar')) return 'grammar';
+        if (explanation.toLowerCase().includes('style')) return 'style';
+        if (explanation.toLowerCase().includes('clarity')) return 'clarity';
+        return 'grammar';
+    }
+
+    applyHighlights(element, suggestions) {
+        console.log('Grammar Assistant: Applying Grammarly-style highlights for', suggestions.length, 'suggestions');
+        console.log('Grammar Assistant: Element type:', element.tagName, 'contentEditable:', element.contentEditable);
+        console.log('Grammar Assistant: Suggestions to highlight:', suggestions.map(s => s.original));
+        
+        // Clear any existing highlights first
+        this.clearHighlights(element);
+        
+        if (!suggestions || suggestions.length === 0) {
+            console.log('Grammar Assistant: No suggestions to highlight');
             return;
         }
-
-        console.log('Grammar Bot: Selection position:', rect);
-
-        this.popup = this.createPopup();
-        this.positionPopup(rect);
         
-        // Ensure popup is added to body and not inside any container that might clip it
-        document.body.appendChild(this.popup);
-        this.isPopupVisible = true;
-        this.popupCreatedTime = Date.now();
-
-        console.log('Grammar Bot: Popup positioned at:', {
-            top: this.popup.style.top,
-            left: this.popup.style.left,
-            position: this.popup.style.position
-        });
-
-        // Ensure popup is immediately visible
-        this.popup.classList.add('gb-popup-visible');
-        this.popup.style.setProperty('opacity', '1', 'important');
-        this.popup.style.setProperty('transform', 'translateY(0)', 'important');
-        
-        console.log('Grammar Bot: Popup should now be visible');
-        console.log('Grammar Bot: Final popup position:', {
-            top: this.popup.style.top,
-            left: this.popup.style.left,
-            opacity: window.getComputedStyle(this.popup).opacity,
-            visibility: window.getComputedStyle(this.popup).visibility,
-            display: window.getComputedStyle(this.popup).display,
-            zIndex: window.getComputedStyle(this.popup).zIndex
-        });
-    }
-
-    getSelectionPosition() {
-        // Use stored element if available (for input/textarea)
-        if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
-            const rect = this.selectedElement.getBoundingClientRect();
-            // For input/textarea, try to get more precise cursor position if possible
-            return {
-                top: rect.top,
-                left: rect.left,
-                bottom: rect.bottom,
-                right: rect.right,
-                width: rect.width,
-                height: rect.height
-            };
-        }
-        
-        // Fallback to active element for input/textarea
-        const activeElement = document.activeElement;
-        if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-            const rect = activeElement.getBoundingClientRect();
-            return {
-                top: rect.top,
-                left: rect.left,
-                bottom: rect.bottom,
-                right: rect.right,
-                width: rect.width,
-                height: rect.height
-            };
-        }
-        
-        // Handle regular text selections
-        const selection = window.getSelection();
-        if (!selection.rangeCount) return null;
-
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-
-        // Ensure we have valid dimensions
-        if (rect.width === 0 && rect.height === 0) {
-            // If the selection has no size, use the range's container element
-            const container = range.commonAncestorContainer;
-            const element = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
-            if (element) {
-                const elementRect = element.getBoundingClientRect();
-                return {
-                    top: elementRect.top,
-                    left: elementRect.left,
-                    bottom: elementRect.bottom,
-                    right: elementRect.right,
-                    width: elementRect.width,
-                    height: elementRect.height
-                };
-            }
-        }
-
-        return {
-            top: rect.top,
-            left: rect.left,
-            bottom: rect.bottom,
-            right: rect.right,
-            width: rect.width,
-            height: rect.height
-        };
-    }
-
-    createPopup() {
-        console.log('Grammar Bot: Creating popup with features:', this.features);
-        
-        const popup = document.createElement('div');
-        popup.className = 'gb-popup';
-        
-        // Add inline styles as fallback to ensure visibility
-        popup.style.cssText = `
-            position: fixed !important;
-            z-index: 2147483647 !important;
-            background: #ffffff !important;
-            border: 1px solid #e1e5e9 !important;
-            border-radius: 12px !important;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
-            width: 320px !important;
-            max-width: calc(100vw - 20px) !important;
-            max-height: 400px !important;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif !important;
-            font-size: 14px !important;
-            line-height: 1.4 !important;
-            color: #333 !important;
-            opacity: 1 !important;
-            transform: translateY(-10px) !important;
-            transition: all 0.2s ease-out !important;
-            overflow: hidden !important;
-            pointer-events: auto !important;
-            isolation: isolate !important;
-            display: block !important;
-            visibility: visible !important;
-        `;
-        
-        popup.innerHTML = `
-            <div class="gb-popup-header">
-                <span class="gb-popup-title">Grammar Bot</span>
-                <button class="gb-popup-close">×</button>
-            </div>
-            <div class="gb-popup-content">
-                <div class="gb-selected-text">
-                    "${this.selectedText.length > 100 ? this.selectedText.substring(0, 100) + '...' : this.selectedText}"
-                </div>
-                <div class="gb-features">
-                    ${this.features.map(feature => `
-                        <button class="gb-feature-btn" data-feature="${feature.id}">
-                            <span class="gb-feature-icon">${feature.icon}</span>
-                            <span class="gb-feature-name">${feature.name}</span>
-                        </button>
-                    `).join('')}
-                </div>
-                <div class="gb-loading" style="display: none;">
-                    <div class="gb-spinner"></div>
-                    <span>Checking grammar...</span>
-                </div>
-                <div class="gb-suggestions" style="display: none;"></div>
-            </div>
-        `;
-
-        // Add event listeners to feature buttons
-        popup.querySelectorAll('.gb-feature-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Grammar Bot: Feature button clicked');
-                const feature = e.currentTarget.dataset.feature;
-                this.checkGrammar(feature);
-            });
-        });
-
-        // Add event listener to close button
-        const closeBtn = popup.querySelector('.gb-popup-close');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Grammar Bot: Close button clicked');
-                this.hidePopup();
-            });
-        }
-
-        console.log('Grammar Bot: Popup created successfully, element:', popup);
-        console.log('Grammar Bot: Popup HTML:', popup.outerHTML.substring(0, 500));
-        
-        return popup;
-    }
-
-    positionPopup(rect) {
-        const popup = this.popup;
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
-        
-        // Since we're using position: fixed, we work with viewport coordinates
-        const popupWidth = 320;
-        const popupHeight = 400; // max-height
-        const padding = 10; // Distance from selection
-        const margin = 10; // Margin from viewport edge
-
-        // Calculate initial position (below the selection)
-        let top = rect.bottom + padding;
-        let left = rect.left;
-
-        // Adjust horizontal position if popup would go off-screen
-        if (left + popupWidth > viewportWidth - margin) {
-            // Try positioning to the left of the selection
-            left = rect.right - popupWidth;
+        // For contenteditable elements, we can highlight the text directly
+        if (element.contentEditable === 'true' || element.hasAttribute('contenteditable')) {
+            let elementHTML = element.innerHTML;
+            console.log('Grammar Assistant: Original element HTML:', elementHTML);
             
-            // If still off-screen, position at the right edge of viewport
+            // Apply highlights for each suggestion
+            suggestions.forEach((suggestion, index) => {
+                if (suggestion.original && suggestion.original.trim()) {
+                    const originalText = suggestion.original.trim();
+                    console.log('Grammar Assistant: Attempting to highlight:', originalText);
+                    // Use more flexible regex that doesn't rely on word boundaries for better matching
+                    const regex = new RegExp(this.escapeRegex(originalText), 'gi');
+                    
+                    // Create highlighted span with data attributes
+                    const replacement = `<span class="grammar-highlight" data-suggestion-id="${suggestion.id}" data-original="${originalText}" data-suggestion="${suggestion.suggestion}" data-explanation="${suggestion.explanation}">${originalText}</span>`;
+                    
+                    const beforeReplace = elementHTML;
+                    elementHTML = elementHTML.replace(regex, replacement);
+                    
+                    if (beforeReplace !== elementHTML) {
+                        console.log('Grammar Assistant: Successfully applied highlight for:', originalText);
+                    } else {
+                        console.warn('Grammar Assistant: Failed to find text to highlight:', originalText);
+                    }
+                }
+            });
+            
+            // Only update if we made changes
+            if (elementHTML !== element.innerHTML) {
+                element.innerHTML = elementHTML;
+                console.log('Grammar Assistant: Updated element HTML with highlights');
+                console.log('Grammar Assistant: New element HTML:', element.innerHTML);
+                
+                // Add hover handlers to highlighted text
+                const highlights = element.querySelectorAll('.grammar-highlight');
+                console.log('Grammar Assistant: Found', highlights.length, 'highlight elements after update');
+                highlights.forEach(highlight => {
+                    this.setupHighlightHover(highlight, element);
+                });
+                
+                // Debug: Check if highlights are still there after a short delay
+                setTimeout(() => {
+                    const stillThere = element.querySelectorAll('.grammar-highlight');
+                    console.log('Grammar Assistant: After 100ms delay, found', stillThere.length, 'highlights still in DOM');
+                    if (stillThere.length === 0) {
+                        console.warn('Grammar Assistant: Highlights were removed shortly after application!');
+                    } else {
+                        // Check if highlights are visible
+                        const firstHighlight = stillThere[0];
+                        const computedStyle = window.getComputedStyle(firstHighlight);
+                        console.log('Grammar Assistant: First highlight CSS:', {
+                            display: computedStyle.display,
+                            visibility: computedStyle.visibility,
+                            opacity: computedStyle.opacity,
+                            borderBottom: computedStyle.borderBottom,
+                            position: computedStyle.position
+                        });
+                    }
+                }, 100);
+            } else {
+                console.warn('Grammar Assistant: No changes made to element HTML - highlights not applied');
+            }
+        } else if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            // For input/textarea, create overlay highlights
+            console.log('Grammar Assistant: Applying overlay highlights for input/textarea');
+            this.createOverlayHighlights(element, suggestions);
+        }
+    }
+
+    setupHighlightHover(highlight, element) {
+        let tooltip = null;
+        let hoverTimeout = null;
+
+        const showTooltip = () => {
+            // Clear any existing timeout
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+            }
+
+            // Get suggestion data
+            const suggestionId = highlight.getAttribute('data-suggestion-id');
+            const original = highlight.getAttribute('data-original');
+            const suggestion = highlight.getAttribute('data-suggestion');
+            const explanation = highlight.getAttribute('data-explanation');
+
+            // Create tooltip
+            tooltip = document.createElement('div');
+            tooltip.className = 'grammar-suggestion-tooltip';
+            
+            tooltip.innerHTML = `
+                <div class="tooltip-suggestion">
+                    <span class="tooltip-original">${original}</span>
+                    <span class="tooltip-arrow">→</span>
+                    <span class="tooltip-corrected">${suggestion}</span>
+                </div>
+                <div class="tooltip-explanation">${explanation}</div>
+                <button class="tooltip-apply" data-suggestion-id="${suggestionId}">Apply suggestion</button>
+            `;
+
+            document.body.appendChild(tooltip);
+
+            // Position tooltip above the highlight
+            const rect = highlight.getBoundingClientRect();
+            const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+            const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+
+            // Force layout to get accurate tooltip dimensions
+            tooltip.style.visibility = 'hidden';
+            tooltip.style.display = 'block';
+            const tooltipRect = tooltip.getBoundingClientRect();
+            tooltip.style.visibility = '';
+            tooltip.style.display = '';
+
+            // Calculate center position of the highlight
+            const highlightCenterX = rect.left + (rect.width / 2) + scrollX;
+            const highlightTop = rect.top + scrollY;
+            const highlightBottom = rect.bottom + scrollY;
+
+            // Position tooltip centered above the highlight
+            let left = highlightCenterX - (tooltipRect.width / 2);
+            let top = highlightTop - tooltipRect.height - 10; // 10px gap above highlight
+            let showBelow = false;
+
+            // Adjust horizontal position if tooltip would go off screen
+            const margin = 10;
             if (left < margin) {
-                left = viewportWidth - popupWidth - margin;
+                left = margin;
+            } else if (left + tooltipRect.width > window.innerWidth - margin) {
+                left = window.innerWidth - tooltipRect.width - margin;
+            }
+
+            // If not enough space above, show below
+            if (top < margin) {
+                top = highlightBottom + 10; // 10px gap below highlight
+                showBelow = true;
+                tooltip.style.setProperty('--arrow-position', 'top');
+            }
+
+            tooltip.style.left = `${left}px`;
+            tooltip.style.top = `${top}px`;
+
+            // Add tooltip hover handlers to keep it visible when hovering over it
+            tooltip.addEventListener('mouseenter', () => {
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+            });
+
+            tooltip.addEventListener('mouseleave', () => {
+                hideTooltip();
+            });
+
+            // Add tooltip hover handlers to keep it visible when hovering over it
+            tooltip.addEventListener('mouseenter', () => {
+                if (hoverTimeout) {
+                    clearTimeout(hoverTimeout);
+                    hoverTimeout = null;
+                }
+            });
+
+            tooltip.addEventListener('mouseleave', () => {
+                hideTooltip();
+            });
+
+            // Show with animation
+            setTimeout(() => {
+                if (tooltip) {
+                    tooltip.classList.add('visible');
+                }
+            }, 10);
+
+            // Add click handler to apply button
+            const applyBtn = tooltip.querySelector('.tooltip-apply');
+            applyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                // Find the suggestion and apply it
+                const elementId = this.getElementId(element);
+                const suggestions = this.suggestions.get(elementId) || [];
+                const suggestionObj = suggestions.find(s => s.id === suggestionId);
+                
+                if (suggestionObj) {
+                    console.log('Grammar Assistant: Applying suggestion from tooltip:', suggestionObj);
+                    
+                    // Hide tooltip immediately
+                    hideTooltip();
+                    
+                    // Apply the suggestion
+                    this.applySuggestion(element, suggestionObj, suggestionId);
+                }
+            });
+        };
+
+        const hideTooltip = () => {
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+            }
+            
+            if (tooltip) {
+                tooltip.classList.remove('visible');
+                setTimeout(() => {
+                    if (tooltip && tooltip.parentNode) {
+                        tooltip.parentNode.removeChild(tooltip);
+                    }
+                    tooltip = null;
+                }, 200);
+            }
+        };
+
+        // Store reference to hideTooltip for global access
+        this.hideTooltip = hideTooltip;
+
+        // Mouse enter - show tooltip after short delay
+        highlight.addEventListener('mouseenter', () => {
+            hoverTimeout = setTimeout(showTooltip, 300); // 300ms delay like Grammarly
+        });
+
+        // Mouse leave - hide tooltip
+        highlight.addEventListener('mouseleave', () => {
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+            }
+            
+            // Hide tooltip after a short delay to allow moving to tooltip
+            setTimeout(() => {
+                if (tooltip && !tooltip.matches(':hover') && !highlight.matches(':hover')) {
+                    hideTooltip();
+                }
+            }, 100);
+        });
+
+        // Note: Tooltip hover handlers will be added after tooltip is created and positioned
+    }
+
+    clearHighlights(element) {
+        console.log('Grammar Assistant: clearHighlights called');
+        console.log('Grammar Assistant: Stack trace:', new Error().stack);
+        
+        // Set flag to prevent button hiding during DOM manipulation
+        const wasAppplying = this.isApplyingSuggestion;
+        this.isApplyingSuggestion = true;
+        
+        // Hide any visible tooltips
+        if (this.hideTooltip) {
+            this.hideTooltip();
+        }
+        
+        // Remove any leftover tooltips
+        const tooltips = document.querySelectorAll('.grammar-suggestion-tooltip');
+        tooltips.forEach(tooltip => {
+            if (tooltip.parentNode) {
+                tooltip.parentNode.removeChild(tooltip);
+            }
+        });
+        
+        if (element.contentEditable === 'true' || element.hasAttribute('contenteditable')) {
+            // Remove all grammar highlight spans
+            const highlights = element.querySelectorAll('.grammar-highlight');
+            console.log('Grammar Assistant: Removing', highlights.length, 'existing highlights');
+            highlights.forEach(highlight => {
+                const parent = highlight.parentNode;
+                if (parent) {
+                    // Replace the highlight span with its text content
+                    const textNode = document.createTextNode(highlight.textContent);
+                    parent.insertBefore(textNode, highlight);
+                    parent.removeChild(highlight);
+                }
+            });
+            
+            // Normalize the element to merge adjacent text nodes
+            element.normalize();
+        } else if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
+            // Remove overlay highlights for input/textarea
+            this.removeOverlayHighlights(element);
+        }
+        
+        // Restore the flag
+        this.isApplyingSuggestion = wasAppplying;
+        console.log('Grammar Assistant: clearHighlights completed');
+    }
+
+    // Panel hover highlighting methods
+    highlightSuggestionInPanel(element, suggestionId) {
+        // Find the specific highlight span for this suggestion
+        const highlight = element.querySelector(`[data-suggestion-id="${suggestionId}"]`);
+        if (highlight) {
+            // Add temporary hover class
+            highlight.classList.add('panel-hover');
+            highlight.style.backgroundColor = 'rgba(255, 215, 0, 0.2)';
+            highlight.style.borderBottomColor = '#FF6B35';
+            console.log('Grammar Assistant: Highlighted suggestion in panel:', suggestionId);
+        }
+    }
+    
+    removeHoverHighlightInPanel(element) {
+        // Remove all panel hover highlights
+        const hoverHighlights = element.querySelectorAll('.grammar-highlight.panel-hover');
+        hoverHighlights.forEach(highlight => {
+            highlight.classList.remove('panel-hover');
+            highlight.style.backgroundColor = '';
+            highlight.style.borderBottomColor = '';
+        });
+    }
+    
+    // Legacy methods - now handled by tooltip system
+    highlightTextInElement(element, originalText) {
+        // This is now handled by the Grammarly-style tooltip system
+        console.log('Grammar Assistant: Legacy highlight method called - using tooltip system instead');
+    }
+    
+    removeHighlightFromElement(element) {
+        // This is now handled by the Grammarly-style tooltip system
+        console.log('Grammar Assistant: Legacy remove highlight method called - using tooltip system instead');
+    }
+    
+    escapeRegex(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    createOverlayHighlights(element, suggestions) {
+        // Remove any existing overlay highlights
+        this.removeOverlayHighlights(element);
+        
+        if (!suggestions || suggestions.length === 0) return;
+        
+        const text = this.getElementText(element);
+        if (!text) return;
+        
+        // Create overlay container
+        const overlay = document.createElement('div');
+        overlay.className = 'grammar-overlay-container';
+        overlay.setAttribute('data-element-id', this.getElementId(element));
+        
+        // Position overlay exactly over the input/textarea
+        const rect = element.getBoundingClientRect();
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        
+        overlay.style.cssText = `
+            position: absolute;
+            left: ${rect.left + scrollX}px;
+            top: ${rect.top + scrollY}px;
+            width: ${rect.width}px;
+            height: ${rect.height}px;
+            pointer-events: none;
+            z-index: 1000;
+            padding: ${window.getComputedStyle(element).padding};
+            font-family: ${window.getComputedStyle(element).fontFamily};
+            font-size: ${window.getComputedStyle(element).fontSize};
+            line-height: ${window.getComputedStyle(element).lineHeight};
+            border: ${window.getComputedStyle(element).borderWidth} solid transparent;
+            box-sizing: border-box;
+            overflow: hidden;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        `;
+        
+        // Create highlighted text
+        let highlightedText = text;
+        
+        // Sort suggestions by position to avoid conflicts
+        const sortedSuggestions = [...suggestions].sort((a, b) => {
+            const aIndex = text.toLowerCase().indexOf(a.original?.toLowerCase() || '');
+            const bIndex = text.toLowerCase().indexOf(b.original?.toLowerCase() || '');
+            return bIndex - aIndex; // Reverse order to replace from end to start
+        });
+        
+        sortedSuggestions.forEach((suggestion) => {
+            if (suggestion.original && suggestion.original.trim()) {
+                const originalText = suggestion.original.trim();
+                const regex = new RegExp(this.escapeRegex(originalText), 'gi');
+                
+                const replacement = `<span class="grammar-overlay-highlight" 
+                    data-suggestion-id="${suggestion.id}" 
+                    data-original="${originalText}" 
+                    data-suggestion="${suggestion.suggestion}" 
+                    data-explanation="${suggestion.explanation}"
+                    style="background: rgba(255, 215, 0, 0.3); border-bottom: 2px solid #FFD700; cursor: pointer; pointer-events: auto;">${originalText}</span>`;
+                
+                highlightedText = highlightedText.replace(regex, replacement);
+            }
+        });
+        
+        overlay.innerHTML = highlightedText;
+        document.body.appendChild(overlay);
+        
+        // Add hover handlers to overlay highlights
+        const overlayHighlights = overlay.querySelectorAll('.grammar-overlay-highlight');
+        overlayHighlights.forEach(highlight => {
+            this.setupHighlightHover(highlight, element);
+        });
+        
+        // Update overlay position on scroll/resize
+        const updateOverlayPosition = () => {
+            const newRect = element.getBoundingClientRect();
+            const newScrollY = window.pageYOffset || document.documentElement.scrollTop;
+            const newScrollX = window.pageXOffset || document.documentElement.scrollLeft;
+            
+            overlay.style.left = `${newRect.left + newScrollX}px`;
+            overlay.style.top = `${newRect.top + newScrollY}px`;
+            overlay.style.width = `${newRect.width}px`;
+            overlay.style.height = `${newRect.height}px`;
+        };
+        
+        // Store update function for cleanup
+        element._overlayUpdateHandler = updateOverlayPosition;
+        
+        // Listen for scroll and resize events
+        window.addEventListener('scroll', updateOverlayPosition, true);
+        window.addEventListener('resize', updateOverlayPosition);
+        
+        console.log('Grammar Assistant: Created overlay highlights for input element');
+    }
+    
+    removeOverlayHighlights(element) {
+        const elementId = this.getElementId(element);
+        const existingOverlay = document.querySelector(`[data-element-id="${elementId}"]`);
+        
+        if (existingOverlay) {
+            // Remove event listeners
+            if (element._overlayUpdateHandler) {
+                window.removeEventListener('scroll', element._overlayUpdateHandler, true);
+                window.removeEventListener('resize', element._overlayUpdateHandler);
+                delete element._overlayUpdateHandler;
+            }
+            
+            existingOverlay.remove();
+        }
+    }
+
+    updateSuggestionPanelContent(element, suggestions) {
+        if (!this.suggestionPanel || !this.isPanelVisible) {
+            // If panel doesn't exist or isn't visible, don't try to update it
+            console.log('Grammar Assistant: Panel not visible, skipping update');
+            return;
+        }
+        
+        console.log('Grammar Assistant: Updating panel content with:', suggestions);
+        
+        // More lenient filtering - check for explanation OR valid suggestion text
+        const validSuggestions = suggestions.filter(s => {
+            const hasExplanation = s.explanation && s.explanation.trim();
+            const hasSuggestion = s.suggestion && s.suggestion.trim();
+            const isValid = hasExplanation || hasSuggestion;
+            console.log('Grammar Assistant: Filtering suggestion:', {
+                id: s.id,
+                original: s.original,
+                suggestion: s.suggestion,
+                explanation: s.explanation,
+                hasExplanation: hasExplanation,
+                hasSuggestion: hasSuggestion,
+                isValid: isValid
+            });
+            return isValid;
+        });
+        
+        console.log('Grammar Assistant: Valid suggestions after filtering:', validSuggestions.length, 'out of', suggestions.length);
+        
+        if (validSuggestions.length === 0) {
+            // Show completion message instead of closing immediately
+            this.suggestionPanel.innerHTML = `
+                <div class="suggestion-header" style="color: #27AE60; text-align: center;">
+                    ✓ All suggestions applied!
+                </div>
+            `;
+        setTimeout(() => {
+                this.hideSuggestionPanel();
+            }, 2000);
+            return;
+        }
+        
+        // Clear existing content and rebuild
+        this.suggestionPanel.innerHTML = '';
+        
+        const header = document.createElement('div');
+        header.className = 'suggestion-header';
+        header.style.cssText = `
+            position: relative;
+            background: white;
+            padding: 12px;
+            margin: 0;
+            border-bottom: 1px solid #f0f0f0;
+            border-radius: 8px 8px 0 0;
+            z-index: 10;
+        `;
+        
+        const headerText = document.createElement('span');
+        headerText.textContent = `${validSuggestions.length} suggestion${validSuggestions.length !== 1 ? 's' : ''} remaining`;
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'suggestion-close-btn';
+        closeBtn.innerHTML = '×';
+        closeBtn.title = 'Close suggestions';
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.hideSuggestionPanel();
+            this.userManuallyClosed = true;
+        });
+        
+        header.appendChild(headerText);
+        header.appendChild(closeBtn);
+        
+        // Fix header positioning to prevent covering first suggestion
+        header.style.cssText = `
+            position: relative;
+            background: white;
+            padding: 12px;
+            margin: 0;
+            border-bottom: 1px solid #f0f0f0;
+            border-radius: 8px 8px 0 0;
+            z-index: 10;
+            flex-shrink: 0;
+        `;
+        
+        this.suggestionPanel.appendChild(header);
+        
+        this.addSuggestionItems(element, validSuggestions);
+        
+        // Removed scroll indicator - users can see the scrollbar
+        
+        // Ensure panel stays positioned correctly
+        this.positionSuggestionPanel(element);
+    }
+
+    addSuggestionItems(element, validSuggestions) {
+        validSuggestions.slice(0, 5).forEach((suggestion, displayIndex) => {
+            console.log('Grammar Assistant: Creating suggestion item for:', suggestion);
+            
+            const item = document.createElement('div');
+            item.className = 'suggestion-item';
+            
+            const text = document.createElement('div');
+            text.className = 'suggestion-text';
+            // Show the replacement with original word using color coding (no strikethrough)
+            if (suggestion.original && suggestion.suggestion) {
+                text.innerHTML = `<span style="color: #E74C3C; font-weight: 500;">${suggestion.original}</span> <span style="color: #666; font-weight: bold; margin: 0 8px;">→</span> <span style="color: #27AE60; font-weight: 500;">${suggestion.suggestion}</span>`;
+            } else {
+                text.textContent = suggestion.suggestion || 'Apply suggestion';
+            }
+            
+            const reason = document.createElement('div');
+            reason.className = 'suggestion-reason';
+            reason.textContent = suggestion.explanation;
+            
+            item.appendChild(text);
+            item.appendChild(reason);
+            
+            // Add hover highlighting for panel suggestions
+            item.addEventListener('mouseenter', () => {
+                this.highlightSuggestionInPanel(element, suggestion.id);
+            });
+            
+            item.addEventListener('mouseleave', () => {
+                this.removeHoverHighlightInPanel(element);
+            });
+            
+            // Find the actual index in the stored suggestions array
+            const elementId = this.getElementId(element);
+            console.log('Grammar Assistant: addSuggestionItems - Element ID:', elementId);
+            console.log('Grammar Assistant: addSuggestionItems - Element type:', element.tagName);
+            const allSuggestions = this.suggestions.get(elementId) || [];
+            console.log('Grammar Assistant: addSuggestionItems - All stored suggestions for this element:', allSuggestions.length);
+            const actualIndex = allSuggestions.findIndex(s => s.id === suggestion.id);
+            
+            console.log('Grammar Assistant: Looking for suggestion ID:', suggestion.id);
+            console.log('Grammar Assistant: All stored suggestions:', allSuggestions.map(s => s.id));
+            console.log('Grammar Assistant: Found suggestion at index:', actualIndex);
+            
+            // Always add click handler - we'll find the index during application
+            item.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent event from bubbling up to global click handler
+                console.log('Grammar Assistant: Suggestion item clicked, suggestion:', suggestion);
+                this.applySuggestion(element, suggestion, suggestion.id); // Pass ID instead of index
+            });
+            
+            // Append to content wrapper instead of main panel
+            if (this.panelContentWrapper) {
+                this.panelContentWrapper.appendChild(item);
+            } else {
+                this.suggestionPanel.appendChild(item);
+            }
+        });
+    }
+
+    showSuggestionPanel(element, suggestions) {
+        console.log('Grammar Assistant: showSuggestionPanel called with:', suggestions);
+        this.hideSuggestionPanel();
+        
+        // More lenient filtering - just check for explanation
+        const validSuggestions = suggestions.filter(s => {
+            const hasExplanation = s.explanation && s.explanation.trim();
+            console.log('Grammar Assistant: Checking suggestion validity:', s, 'Valid:', hasExplanation);
+            return hasExplanation;
+        });
+        
+        console.log('Grammar Assistant: Valid suggestions after filtering:', validSuggestions);
+        
+        if (validSuggestions.length === 0) {
+            console.log('Grammar Assistant: No valid suggestions to show');
+                return;
+            }
+
+        this.suggestionPanel = document.createElement('div');
+        this.suggestionPanel.className = 'grammar-suggestion-panel';
+        
+        // Ensure proper positioning styles are set with flexbox layout
+        this.suggestionPanel.style.cssText = `
+            position: absolute;
+            z-index: 2147483647;
+            display: flex;
+            flex-direction: column;
+            max-height: 300px;
+            overflow: hidden;
+        `;
+        
+        const header = document.createElement('div');
+        header.className = 'suggestion-header';
+        header.style.cssText = `
+            position: relative;
+            background: white;
+            padding: 12px;
+            margin: 0;
+            border-bottom: 1px solid #f0f0f0;
+            border-radius: 8px 8px 0 0;
+            z-index: 10;
+        `;
+        
+        const headerText = document.createElement('span');
+        headerText.textContent = `${validSuggestions.length} suggestion${validSuggestions.length !== 1 ? 's' : ''} found`;
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'suggestion-close-btn';
+        closeBtn.innerHTML = '×';
+        closeBtn.title = 'Close suggestions';
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.hideSuggestionPanel();
+            this.userManuallyClosed = true;
+        });
+        
+        header.appendChild(headerText);
+        header.appendChild(closeBtn);
+        
+        // Create content wrapper for scrollable area
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = 'panel-content';
+        contentWrapper.style.cssText = `
+            overflow-y: auto;
+            padding: 0 12px 12px 12px;
+            flex: 1;
+            max-height: calc(300px - 60px);
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f5f5f5;
+        `;
+        
+        this.suggestionPanel.appendChild(header);
+        this.suggestionPanel.appendChild(contentWrapper);
+        
+        // Store reference to content wrapper for adding items
+        this.panelContentWrapper = contentWrapper;
+        
+        this.addSuggestionItems(element, validSuggestions);
+        
+        console.log('Grammar Assistant: Adding suggestion panel to DOM');
+        console.log('Grammar Assistant: Panel element:', this.suggestionPanel);
+        console.log('Grammar Assistant: Panel className:', this.suggestionPanel.className);
+        console.log('Grammar Assistant: Panel innerHTML:', this.suggestionPanel.innerHTML);
+        
+        document.body.appendChild(this.suggestionPanel);
+        console.log('Grammar Assistant: Panel added to DOM, positioning...');
+        
+        this.positionSuggestionPanel(element);
+        this.isPanelVisible = true;
+        
+        console.log('Grammar Assistant: Panel positioned, current styles:', {
+            position: this.suggestionPanel.style.position,
+            left: this.suggestionPanel.style.left,
+            top: this.suggestionPanel.style.top,
+            opacity: this.suggestionPanel.style.opacity,
+            transform: this.suggestionPanel.style.transform,
+            visibility: this.suggestionPanel.style.visibility
+        });
+        
+        // Make panel visible with animation
+            setTimeout(() => {
+            if (this.suggestionPanel) {
+                console.log('Grammar Assistant: Making panel visible');
+                this.suggestionPanel.classList.add('visible');
+                
+                // Removed scroll indicator - users can see the scrollbar
+                
+                console.log('Grammar Assistant: Panel should now be visible');
+            } else {
+                console.log('Grammar Assistant: Panel is null when trying to make visible');
+                }
+            }, 10);
+    }
+
+    positionSuggestionPanel(element) {
+        if (!element || !this.suggestionPanel) return;
+        
+        const rect = element.getBoundingClientRect();
+        const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+        
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
+        const margin = 10;
+        
+        // Calculate space above and below the element
+        const spaceBelow = viewportHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        
+        // Estimate panel height (use a reasonable default)
+        const estimatedPanelHeight = 200; // Default estimate
+        
+        let left = rect.left + scrollX;
+        let top;
+        let showAbove = false;
+        
+        // Simple positioning logic
+        if (spaceBelow >= estimatedPanelHeight + margin || spaceBelow >= spaceAbove) {
+            // Show below if there's decent space or more space below than above
+            top = rect.bottom + margin + scrollY;
+            showAbove = false;
+            
+            // If very limited space below, constrain height
+            if (spaceBelow < estimatedPanelHeight + margin) {
+                const maxHeight = Math.max(150, spaceBelow - margin * 2);
+                this.suggestionPanel.style.maxHeight = `${maxHeight}px`;
+            }
+        } else {
+            // Show above
+            showAbove = true;
+            
+            // If limited space above, constrain height
+            if (spaceAbove < estimatedPanelHeight + margin) {
+                const maxHeight = Math.max(150, spaceAbove - margin * 2);
+                this.suggestionPanel.style.maxHeight = `${maxHeight}px`;
+                top = rect.top - maxHeight - margin + scrollY;
+            } else {
+                top = rect.top - estimatedPanelHeight - margin + scrollY;
             }
         }
         
-        // Ensure minimum left margin
+        // Adjust horizontal position to stay within viewport
+        const estimatedPanelWidth = 320; // From CSS max-width
+        if (left + estimatedPanelWidth > viewportWidth) {
+            left = Math.max(margin, viewportWidth - estimatedPanelWidth - margin);
+        }
+        
+        // Ensure panel doesn't go off the left edge
         if (left < margin) {
             left = margin;
         }
-
-        // Adjust vertical position if popup would go off-screen
-        if (top + popupHeight > viewportHeight - margin) {
-            // Position above the selection
-            top = rect.top - popupHeight - padding;
-            
-            // If still off-screen, position at the bottom of viewport
-            if (top < margin) {
-                top = viewportHeight - popupHeight - margin;
-            }
-        }
         
-        // Ensure minimum top margin
-        if (top < margin) {
-            top = margin;
-        }
-
-        // Apply position with !important to override any website styles
-        popup.style.setProperty('top', `${top}px`, 'important');
-        popup.style.setProperty('left', `${left}px`, 'important');
-        popup.style.setProperty('position', 'fixed', 'important');
+        // Apply position
+        this.suggestionPanel.style.left = `${left}px`;
+        this.suggestionPanel.style.top = `${top}px`;
         
-        // Add fallback positioning to center if positioning fails
-        if (top < 0 || top > viewportHeight || left < 0 || left > viewportWidth) {
-            console.warn('Grammar Bot: Position out of bounds, using fallback center position');
-            popup.style.setProperty('top', '50px', 'important');
-            popup.style.setProperty('left', '50px', 'important');
+        // Set initial transform for animation
+        this.suggestionPanel.style.transform = showAbove ? 'translateY(10px)' : 'translateY(-10px)';
+        
+        console.log('Grammar Assistant: Panel positioned', {
+            showAbove,
+            left,
+            top,
+            elementRect: rect,
+            spaceAbove,
+            spaceBelow
+        });
+    }
+
+    hideSuggestionPanel() {
+        if (this.suggestionPanel) {
+            this.suggestionPanel.remove();
+            this.suggestionPanel = null;
+        }
+        this.isPanelVisible = false;
+        
+        // Remove any highlighting when panel is hidden
+        if (this.currentElement) {
+            this.removeHighlightFromElement(this.currentElement);
         }
     }
 
-    async checkGrammar(feature = 'grammar_check') {
-        // Add null check at the start
-        if (!this.popup) {
-            console.error('Grammar check failed: popup is null');
-            return;
-        }
-
-        const loadingEl = this.popup.querySelector('.gb-loading');
-        const suggestionsEl = this.popup.querySelector('.gb-suggestions');
-        const featuresEl = this.popup.querySelector('.gb-features');
-
-        // Additional null checks
-        if (!loadingEl || !suggestionsEl || !featuresEl) {
-            console.error('Grammar check failed: popup elements not found');
-            return;
-        }
-
-        // Reset applied suggestions for new check
-        this.appliedSuggestions.clear();
-        this.originalSelectedText = null; // Reset for new text selection
+    applySuggestion(element, suggestion, suggestionId) {
+        console.log('Grammar Assistant: Applying suggestion:', suggestion);
+        console.log('Grammar Assistant: Suggestion ID to remove:', suggestionId);
         
-        // Prevent popup from being hidden during API call
-        this.isCheckingGrammar = true;
-        console.log('Started grammar check, popup protection enabled');
-
-        // Show loading state
-        featuresEl.style.display = 'none';
-        suggestionsEl.style.display = 'none';
-        loadingEl.style.display = 'flex';
-
-        try {
-            console.log('Making request to backend via background script with text:', this.selectedText);
-            
-            // Use background script proxy to avoid CORS issues
-            const data = await chrome.runtime.sendMessage({
-                action: 'checkGrammar',
-                data: {
-                    text: this.selectedText,
-                    feature: feature
-                }
-            });
-
-            console.log('Response received from background script:', data);
-
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            console.log('Data parsed successfully:', data);
-            
-            // Check if popup still exists before displaying results
-            if (this.popup) {
-                this.displaySuggestions(data);
-            } else {
-                console.log('Popup was destroyed during API call, recreating it');
-                this.recreatePopupForResults();
-                if (this.popup) {
-                    this.displaySuggestions(data);
-                }
-            }
-
-        } catch (error) {
-            console.error('Grammar check failed:', error);
-            console.error('Error name:', error.name);
-            console.error('Error message:', error.message);
-            console.error('Error stack:', error.stack);
-            
-            let errorMessage = error.message;
-            
-            // Provide more specific error messages
-            if (error.message.includes('Failed to fetch') || error.message.includes('fetch')) {
-                errorMessage = 'Cannot connect to Grammar Bot server. Please check if the backend is running on http://127.0.0.1:8000';
-            } else if (error.message.includes('Extension context invalidated')) {
-                errorMessage = 'Extension was reloaded. Please refresh the page and try again.';
-            } else if (error.message.includes('Could not establish connection')) {
-                errorMessage = 'Communication error with extension. Please reload the extension.';
-            }
-            
-            // Check if popup still exists before displaying error
-            if (this.popup) {
-                this.displayError(errorMessage);
-            } else {
-                console.log('Popup was destroyed during API call, recreating it for error');
-                this.recreatePopupForResults();
-                if (this.popup) {
-                    this.displayError(errorMessage);
-                }
-            }
-        } finally {
-            // Check if popup still exists before hiding loading
-            if (this.popup && loadingEl) {
-                loadingEl.style.display = 'none';
-            }
-            // Allow popup to be hidden again
-            this.isCheckingGrammar = false;
-            console.log('Grammar check completed, popup protection disabled');
+        // Ensure button stays visible throughout the entire process
+        if (this.floatingButton && !this.floatingButton.classList.contains('visible')) {
+            this.floatingButton.classList.add('visible');
         }
-    }
-
-    displaySuggestions(data) {
-        if (!this.popup) {
-            console.error('Cannot display suggestions: popup is null');
+        
+        // Clear any pending text analysis to prevent immediate re-analysis
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = null;
+        }
+        
+        // Also clear any pending re-analysis
+        if (this.reanalysisTimer) {
+            clearTimeout(this.reanalysisTimer);
+            this.reanalysisTimer = null;
+        }
+        
+        // Validate suggestion
+        if (!suggestion.suggestion || !suggestion.suggestion.trim()) {
+            console.error('Grammar Assistant: Invalid suggestion - empty replacement text');
+            this.showToast('Invalid suggestion', 'error');
             return;
         }
         
-        const suggestionsEl = this.popup.querySelector('.gb-suggestions');
+        const text = this.getElementText(element);
+        console.log('Grammar Assistant: Current text:', text);
         
-        if (!suggestionsEl) {
-            console.error('Cannot find suggestions element in popup');
-            return;
-        }
-        
-        // Store suggestions for tracking
-        this.currentSuggestions = data.suggestions || [];
-        
-        if (!data.has_errors || data.suggestions.length === 0) {
-            suggestionsEl.innerHTML = `
-                <div class="gb-no-errors">
-                    <span class="gb-success-icon">✅</span>
-                    <span>No grammar issues found!</span>
-                </div>
-            `;
+        // Use simple text replacement - LLM should handle punctuation correctly
+        let newText = text;
+        if (suggestion.original && suggestion.original.trim()) {
+            // Use the LLM's suggestion directly
+            newText = text.replace(suggestion.original, suggestion.suggestion);
         } else {
-            this.renderSuggestions(suggestionsEl);
-        }
-
-        suggestionsEl.style.display = 'block';
-    }
-
-    renderSuggestions(suggestionsEl) {
-        const unappliedSuggestions = this.currentSuggestions.filter((_, index) => 
-            !this.appliedSuggestions.has(index)
-        );
-        
-        const appliedCount = this.appliedSuggestions.size;
-        const totalCount = this.currentSuggestions.length;
-        
-        if (unappliedSuggestions.length === 0 && appliedCount > 0) {
-            suggestionsEl.innerHTML = `
-                <div class="gb-all-applied">
-                    <span class="gb-success-icon">🎉</span>
-                    <span>All ${totalCount} fixes have been applied successfully!</span>
-                    <div class="gb-apply-all">
-                        <button class="gb-close-btn">Close</button>
-                    </div>
-                </div>
-            `;
-            
-            suggestionsEl.querySelector('.gb-close-btn')?.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Grammar Bot: Close button clicked from completion state');
-                this.hidePopup();
-            });
-            return;
-        }
-        
-        const headerText = appliedCount > 0 
-            ? `Applied ${appliedCount}/${totalCount} fixes. ${unappliedSuggestions.length} remaining:`
-            : `Found ${totalCount} suggestion(s):`;
-            
-        suggestionsEl.innerHTML = `
-            <div class="gb-suggestions-header">
-                <span>${headerText}</span>
-            </div>
-            <div class="gb-suggestions-list">
-                ${this.currentSuggestions.map((suggestion, index) => {
-                    const isApplied = this.appliedSuggestions.has(index);
-                    return `
-                        <div class="gb-suggestion-item ${isApplied ? 'gb-applied' : ''}">
-                            <div class="gb-suggestion-text">
-                                <span class="gb-original">"${suggestion.original_text}"</span>
-                                <span class="gb-arrow">→</span>
-                                <span class="gb-corrected">"${suggestion.corrected_text}"</span>
-                            </div>
-                            <div class="gb-suggestion-explanation">${suggestion.explanation}</div>
-                            <div class="gb-suggestion-actions">
-                                ${isApplied 
-                                    ? '<span class="gb-applied-label">✅ Applied</span>'
-                                    : `<button class="gb-apply-btn" data-index="${index}">Apply Fix</button>`
-                                }
-                                <span class="gb-confidence">Confidence: ${Math.round(suggestion.confidence * 100)}%</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-            <div class="gb-apply-all">
-                ${unappliedSuggestions.length > 0 
-                    ? `<button class="gb-apply-remaining-btn">Apply ${unappliedSuggestions.length > 1 ? unappliedSuggestions.length + ' Remaining' : 'Remaining'} Fix${unappliedSuggestions.length > 1 ? 'es' : ''}</button>`
-                    : ''
+            // If no original text, try to find the problematic word from explanation
+            const explanation = suggestion.explanation.toLowerCase();
+            if (explanation.includes("'") && explanation.includes("'")) {
+                // Extract word from explanation like "The verb should agree with the singular subject 'It'."
+                const matches = explanation.match(/'([^']+)'/g);
+                if (matches && matches.length > 0) {
+                    const wordToReplace = matches[0].replace(/'/g, '');
+                    newText = text.replace(new RegExp(`\\b${wordToReplace}\\b`, 'i'), suggestion.suggestion);
                 }
-            </div>
-        `;
-
-        // Add event listeners for apply buttons
-        suggestionsEl.querySelectorAll('.gb-apply-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Grammar Bot: Apply button clicked');
-                const index = parseInt(e.target.dataset.index);
-                this.applySuggestion(this.currentSuggestions[index], index);
-            });
-        });
-
-        suggestionsEl.querySelector('.gb-apply-remaining-btn')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Grammar Bot: Apply remaining fixes button clicked');
-            this.applyRemainingFixes();
-        });
-
-
-    }
-
-    displayError(message) {
-        if (!this.popup) {
-            console.error('Cannot display error: popup is null');
-            return;
-        }
-        
-        const suggestionsEl = this.popup.querySelector('.gb-suggestions');
-        
-        if (!suggestionsEl) {
-            console.error('Cannot find suggestions element in popup');
-            return;
-        }
-        
-        suggestionsEl.innerHTML = `
-            <div class="gb-error">
-                <span class="gb-error-icon">❌</span>
-                <span>Error: ${message}</span>
-                <div class="gb-error-details">
-                    Make sure the Grammar Bot backend is running on http://127.0.0.1:8000
-                </div>
-            </div>
-        `;
-        suggestionsEl.style.display = 'block';
-    }
-
-    applySuggestion(suggestion, suggestionIndex) {
-        try {
-            // Set flag to prevent popup from being hidden during fix application
-            this.isApplyingFix = true;
-            console.log('Grammar Bot: Starting fix application, popup protection enabled');
-            console.log('Grammar Bot: Suggestion to apply:', suggestion.original_text, '→', suggestion.corrected_text, 'Index:', suggestionIndex);
-            
-            // Debug current state
-            console.log('Grammar Bot: Current state - selectedElement:', this.selectedElement?.tagName, 'selectionRange:', !!this.selectionRange);
-            console.log('Grammar Bot: Applied suggestions so far:', Array.from(this.appliedSuggestions));
-            
-            // Apply this single suggestion (DON'T mark as applied until we know it succeeded)
-            let success = false;
-
-            // Check if we're dealing with an input or textarea element
-            if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
-                console.log('Grammar Bot: Applying to input element');
-                success = this.applySingleToInputElement(this.selectedElement, suggestion, suggestionIndex);
-            } else if (this.selectionRange) {
-                console.log('Grammar Bot: Applying to text node');
-                success = this.applySingleToTextNode(suggestion);
             } else {
-                console.error('Grammar Bot: No valid target found - neither selectedElement nor selectionRange available');
-                console.log('Grammar Bot: selectedElement:', this.selectedElement);
-                console.log('Grammar Bot: selectionRange:', this.selectionRange);
-            }
-
-            if (success) {
-                // Mark this suggestion as applied ONLY after successful application
-                this.appliedSuggestions.add(suggestionIndex);
-                
-                // Show brief success message
-                this.showSuccessMessage('Fix applied successfully!');
-                
-                // Update the suggestions display to show the applied state
-                const suggestionsEl = this.popup.querySelector('.gb-suggestions');
-                if (suggestionsEl) {
-                    this.renderSuggestions(suggestionsEl);
+                // Try common grammar fixes if we can't extract from explanation
+                if (explanation.includes('verb') && explanation.includes('agree')) {
+                    // Common subject-verb agreement fixes
+                    if (text.includes('I are')) newText = text.replace('I are', 'I am');
+                    else if (text.includes('It have')) newText = text.replace('It have', 'It has');
+                    else if (text.includes('He have')) newText = text.replace('He have', 'He has');
+                    else if (text.includes('She have')) newText = text.replace('She have', 'She has');
                 }
-                
-                // Check if all suggestions have been applied
-                const allApplied = this.appliedSuggestions.size === this.currentSuggestions.length;
-                if (allApplied) {
-                    // Auto-close popup after a short delay since all fixes are now applied
-                    setTimeout(() => {
-                        this.hidePopupAndClearSelection();
-                    }, 600); // Close after 0.6 seconds
-                }
-                
-                console.log(`Grammar Bot: Applied suggestion ${suggestionIndex + 1}/${this.currentSuggestions.length}`);
-            } else {
-                console.error('Grammar Bot: Fix application failed for suggestion:', suggestion.original_text);
-                this.showErrorMessage('Failed to apply the suggestion. Please try manually.');
-            }
-            
-        } catch (error) {
-            console.error('Failed to apply suggestion:', error);
-            // Remove from applied suggestions if it failed
-            this.appliedSuggestions.delete(suggestionIndex);
-            this.showErrorMessage('Failed to apply the suggestion. Please try manually.');
-        } finally {
-            // Clear the flag after a longer delay to prevent race conditions with handleTextSelection
-            setTimeout(() => {
-                this.isApplyingFix = false;
-                console.log('Grammar Bot: Fix application completed, popup protection disabled');
-            }, 200);
-        }
-    }
-
-    applySingleToInputElement(element, suggestion, suggestionIndex) {
-        try {
-            const startPos = this.selectionStart;
-            const endPos = this.selectionEnd;
-            
-            // Validate we have the selection positions
-            if (startPos === null || endPos === null) {
-                console.error('No stored selection positions for input element');
-                return false;
-            }
-            
-            console.log('Grammar Bot: Applying suggestion to input element:', suggestion.original_text, '→', suggestion.corrected_text);
-            console.log('Grammar Bot: Original selection:', startPos, 'to', endPos);
-            
-            // Get current text content
-            const currentText = element.value;
-            
-            // Calculate current end position based on applied changes
-            const totalLengthChange = this.calculateTotalLengthChange();
-            const currentEndPos = endPos + totalLengthChange;
-            
-            console.log('Grammar Bot: Current end position after previous changes:', currentEndPos, 'total length change:', totalLengthChange);
-            
-            // Get the currently selected text
-            let currentSelectedText = currentText.substring(startPos, currentEndPos);
-            
-            // Store original text if this is the first fix
-            if (this.appliedSuggestions.size === 0) {
-                this.originalSelectedText = currentSelectedText;
-                console.log('Grammar Bot: Stored original text:', this.originalSelectedText);
-            }
-            
-            console.log('Grammar Bot: Current selected text:', currentSelectedText);
-            console.log('Grammar Bot: Looking for original text:', suggestion.original_text);
-            
-            // Find the suggestion's original text in the current content
-            const originalTextIndex = currentSelectedText.indexOf(suggestion.original_text);
-            if (originalTextIndex === -1) {
-                console.warn('Grammar Bot: Original text not found in current selection:', suggestion.original_text);
-                console.log('Current selected text:', JSON.stringify(currentSelectedText));
-                console.log('Original text:', JSON.stringify(suggestion.original_text));
-                return false;
-            }
-            
-            // Calculate absolute position in the full text
-            const absoluteStartPos = startPos + originalTextIndex;
-            const absoluteEndPos = absoluteStartPos + suggestion.original_text.length;
-            
-            console.log('Grammar Bot: Found original text at absolute position:', absoluteStartPos, 'to', absoluteEndPos);
-            
-            // Replace the text at the found position
-            const newValue = currentText.substring(0, absoluteStartPos) + 
-                            suggestion.corrected_text + 
-                            currentText.substring(absoluteEndPos);
-            
-            element.value = newValue;
-            
-            // Calculate the length difference for this fix
-            const lengthDifference = suggestion.corrected_text.length - suggestion.original_text.length;
-            
-            // Update our stored end position to account for this change
-            this.selectionEnd = currentEndPos + lengthDifference;
-            
-            // Store the length change for this suggestion
-            if (!this.suggestionLengthChanges) {
-                this.suggestionLengthChanges = new Map();
-            }
-            this.suggestionLengthChanges.set(suggestionIndex, lengthDifference);
-            
-            // Position cursor at the end of the replaced text
-            const newCursorPos = absoluteStartPos + suggestion.corrected_text.length;
-            element.setSelectionRange(newCursorPos, newCursorPos);
-            
-            // Don't focus the element as it might trigger selection change events
-            // that could clear our state
-            // element.focus();
-            
-            console.log('Grammar Bot: Successfully applied suggestion. Length change:', lengthDifference);
-            console.log('Grammar Bot: New selection end position:', this.selectionEnd);
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to apply single suggestion to input element:', error);
-            return false;
-        }
-    }
-
-    calculateTotalLengthChange() {
-        if (!this.suggestionLengthChanges) {
-            return 0;
-        }
-        
-        let totalChange = 0;
-        for (const [index, lengthChange] of this.suggestionLengthChanges.entries()) {
-            if (this.appliedSuggestions.has(index)) {
-                totalChange += lengthChange;
             }
         }
         
-        return totalChange;
-    }
-
-    applySingleToTextNode(suggestion) {
-        try {
-            // For text nodes, use the same logic as the improved applyToTextNode
-            return this.applyToTextNode(suggestion);
-        } catch (error) {
-            console.error('Failed to apply single suggestion to text node:', error);
-            return false;
+        if (newText === text) {
+            console.log('Grammar Assistant: Suggestion not applicable - text already changed or not found. Ignoring silently.');
+            
+            // Remove this outdated suggestion silently
+            const elementId = this.getElementId(element);
+            const suggestions = this.suggestions.get(elementId) || [];
+            const indexToRemove = suggestions.findIndex(s => s.id === suggestionId);
+            
+            if (indexToRemove >= 0) {
+                suggestions.splice(indexToRemove, 1);
+                this.suggestions.set(elementId, suggestions);
+                
+                // Update button and panel
+                this.updateButtonState('complete', suggestions.length);
+                if (this.isPanelVisible) {
+                    this.updateSuggestionPanelContent(element, suggestions);
+                }
+                
+                console.log('Grammar Assistant: Removed outdated suggestion. Remaining:', suggestions.length);
+            }
+            
+            return;
         }
-    }
-
-    applyToInputElement(element, suggestion) {
-        // This function is kept for backward compatibility but now redirects to the single version
-        return this.applySingleToInputElement(element, suggestion);
-    }
-
-    applyToTextNode(suggestion) {
-        try {
-            console.log('Grammar Bot: Applying suggestion to text node:', suggestion.original_text, '→', suggestion.corrected_text);
-            
-            if (!this.selectionRange) {
-                console.error('No selection range available for text node fix');
-                return false;
-            }
-            
-            // For the first fix, store the original content and create a new strategy
-            if (this.appliedSuggestions.size === 0) {
-                // Store the original selection for reference
-                this.originalSelectedText = this.selectionRange.toString();
-                console.log('Grammar Bot: Stored original text for text node:', this.originalSelectedText);
-                
-                // Create a container to hold our working text
-                const wrapper = document.createElement('span');
-                wrapper.className = 'gb-temp-wrapper';
-                wrapper.style.cssText = 'display: inline; background: transparent; border: none; margin: 0; padding: 0;';
-                
-                // Extract the original content
-                const originalContent = this.selectionRange.extractContents();
-                wrapper.appendChild(originalContent);
-                
-                // Insert the wrapper at the selection point
-                this.selectionRange.insertNode(wrapper);
-                
-                // Store reference to our wrapper
-                this.textNodeWrapper = wrapper;
-                
-                console.log('Grammar Bot: Created wrapper for text node processing');
-            }
-            
-            if (!this.textNodeWrapper || !this.textNodeWrapper.parentNode) {
-                console.error('Text node wrapper not available or removed from DOM');
-                return false;
-            }
-            
-            // Get current text content from wrapper
-            const currentText = this.textNodeWrapper.textContent;
-            console.log('Grammar Bot: Current wrapper text:', currentText);
-            
-            // Find and replace the suggestion
-            const originalTextIndex = currentText.indexOf(suggestion.original_text);
-            if (originalTextIndex === -1) {
-                console.warn('Grammar Bot: Original text not found in wrapper:', suggestion.original_text);
-                console.log('Current wrapper text:', JSON.stringify(currentText));
-                return false;
-            }
-            
-            // Apply the replacement
-            const newText = currentText.substring(0, originalTextIndex) + 
-                           suggestion.corrected_text + 
-                           currentText.substring(originalTextIndex + suggestion.original_text.length);
-            
-            // Update the wrapper content
-            this.textNodeWrapper.textContent = newText;
-            
-            console.log('Grammar Bot: Updated wrapper text to:', newText);
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to apply to text node:', error);
-            return false;
+        
+        // Apply the new text
+        console.log('Grammar Assistant: Replacing text:', text, '→', newText);
+        
+        // Temporarily disable text monitoring to prevent triggering analysis
+        this.isApplyingSuggestion = true;
+        
+        // Ensure button stays visible before text changes
+        if (this.floatingButton) {
+            this.floatingButton.classList.add('visible');
         }
-    }
-
-    applyRemainingFixes() {
-        try {
-            // Set flag to prevent popup from being hidden during fix application
-            this.isApplyingFix = true;
-            console.log('Grammar Bot: Starting remaining fixes application, popup protection enabled');
+        
+        // For contenteditable elements, use targeted replacement to preserve formatting
+        if (element.contentEditable === 'true') {
+            // Instead of replacing the entire text, apply the specific change
+            const change = {
+                oldText: suggestion.original,
+                newText: suggestion.suggestion
+            };
             
-            // Get unapplied suggestions
-            const unappliedSuggestions = this.currentSuggestions.filter((_, index) => 
-                !this.appliedSuggestions.has(index)
-            );
-            
-            if (unappliedSuggestions.length === 0) {
-                this.showSuccessMessage('All fixes have already been applied!');
+            if (this.applyTargetedChange(element, change)) {
+                console.log('Grammar Assistant: Targeted change applied successfully');
+        } else {
+                console.log('Grammar Assistant: Targeted change failed - text likely already changed. Ignoring silently.');
+                
+                // Remove this outdated suggestion silently
+                const elementId = this.getElementId(element);
+                const suggestions = this.suggestions.get(elementId) || [];
+                const indexToRemove = suggestions.findIndex(s => s.id === suggestionId);
+                
+                if (indexToRemove >= 0) {
+                    suggestions.splice(indexToRemove, 1);
+                    this.suggestions.set(elementId, suggestions);
+                    
+                    // Update button and panel
+                    this.updateButtonState('complete', suggestions.length);
+                    if (this.isPanelVisible) {
+                        this.updateSuggestionPanelContent(element, suggestions);
+                    }
+                    
+                    console.log('Grammar Assistant: Removed outdated contenteditable suggestion. Remaining:', suggestions.length);
+                }
+                
+                this.isApplyingSuggestion = false;
                 return;
             }
-
-            let success = false;
-
-            // Check if we're dealing with an input or textarea element
-            if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
-                success = this.applyAllToInputElement(this.selectedElement, unappliedSuggestions);
-            } else if (this.selectionRange) {
-                success = this.applyAllToTextNode(unappliedSuggestions);
+        } else {
+            // For input/textarea, use the normal method
+            this.setElementText(element, newText);
+        }
+        
+        // Ensure button stays visible after text changes
+        if (this.floatingButton) {
+            this.floatingButton.classList.add('visible');
+        }
+        
+        this.isApplyingSuggestion = false;
+        
+        // Remove the applied suggestion by ID
+        const elementId = this.getElementId(element);
+        console.log('Grammar Assistant: Looking for suggestions for element:', elementId);
+        console.log('Grammar Assistant: Element details:', {
+            tagName: element.tagName,
+            id: element.id,
+            className: element.className,
+            grammarAssistantId: element.grammarAssistantId
+        });
+        console.log('Grammar Assistant: All stored suggestions in Map:', [...this.suggestions.entries()]);
+        const suggestions = this.suggestions.get(elementId) || [];
+        console.log('Grammar Assistant: Retrieved suggestions:', suggestions.map(s => ({ id: s.id, original: s.original })));
+        console.log('Grammar Assistant: Before removing suggestion - total suggestions:', suggestions.length);
+        console.log('Grammar Assistant: Removing suggestion with ID:', suggestionId);
+        
+        const indexToRemove = suggestions.findIndex(s => s.id === suggestionId);
+        console.log('Grammar Assistant: Found suggestion at index:', indexToRemove);
+        
+        if (indexToRemove >= 0) {
+            suggestions.splice(indexToRemove, 1);
+            this.suggestions.set(elementId, suggestions);
+            console.log('Grammar Assistant: After removing suggestion - remaining suggestions:', suggestions.length);
+        } else {
+            console.error('Grammar Assistant: Could not find suggestion with ID:', suggestionId, 'Available IDs:', suggestions.map(s => s.id));
+        }
+        
+        // Update button count immediately (before updating highlights to ensure smooth transition)
+        this.updateButtonState('complete', suggestions.length);
+        
+        // Update highlights with remaining suggestions
+        this.applyHighlights(element, suggestions);
+        
+        // Update UI
+        this.updateElementIndicator(element, suggestions.length > 0 ? 'has-suggestions' : 'clean');
+        
+        // Update panel content to show remaining suggestions (if panel is open)
+        if (this.isPanelVisible) {
+            this.updateSuggestionPanelContent(element, suggestions);
+        }
+        
+        // Toast removed for cleaner UX - user can see the text change directly
+        
+        // Queue delayed re-analysis to catch any issues with the applied suggestion
+        // This acts as a self-correcting mechanism (silent background verification)
+        this.queueDelayedReanalysis(element, 5000); // 5 second delay for background verification
+        
+        // Final safeguard: ensure button is visible at the end of the process
+        if (this.floatingButton) {
+            this.floatingButton.classList.add('visible');
+            console.log('Grammar Assistant: Final visibility check - button should be visible');
+        }
+        
+        // Additional safeguard: ensure button stays visible for at least 500ms after suggestion application
+        setTimeout(() => {
+            if (this.floatingButton && this.currentElement) {
+                this.floatingButton.classList.add('visible');
+                console.log('Grammar Assistant: Post-application visibility check - ensuring button remains visible');
             }
+        }, 100);
+        
+        console.log('Grammar Assistant: Applied suggestion successfully. Remaining:', suggestions.length);
+    }
 
-            if (success) {
-                // Mark all remaining suggestions as applied
-                this.currentSuggestions.forEach((_, index) => {
-                    if (!this.appliedSuggestions.has(index)) {
-                        this.appliedSuggestions.add(index);
-                    }
-                });
-                
-                this.showSuccessMessage(`Applied ${unappliedSuggestions.length} remaining fixes successfully!`);
-                
-                // Update the suggestions display
-                const suggestionsEl = this.popup.querySelector('.gb-suggestions');
-                if (suggestionsEl) {
-                    this.renderSuggestions(suggestionsEl);
-                }
-                
-                // Auto-close popup after a short delay since success notification is shown
-                setTimeout(() => {
-                    this.hidePopupAndClearSelection();
-                }, 600); // Close after 0.6 seconds
-            } else {
-                this.showErrorMessage('Failed to apply remaining suggestions. Please try manually.');
-            }
-            
-        } catch (error) {
-            console.error('Failed to apply remaining suggestions:', error);
-            this.showErrorMessage('Failed to apply remaining suggestions. Please try manually.');
-        } finally {
-            // Clear the flag after a short delay to allow DOM to settle
-            setTimeout(() => {
-                this.isApplyingFix = false;
-                console.log('Grammar Bot: Remaining fixes application completed, popup protection disabled');
-            }, 100);
+    updateButtonState(state, count = 0) {
+        if (!this.floatingButton) return;
+        
+        console.log('Grammar Assistant: updateButtonState called with state:', state, 'count:', count);
+        
+        // Preserve all existing classes while updating state
+        console.log('Grammar Assistant: updateButtonState - className before:', this.floatingButton.className);
+        
+        // Ensure base class is present without removing other classes
+        if (!this.floatingButton.classList.contains('grammar-floating-btn')) {
+            this.floatingButton.classList.add('grammar-floating-btn');
+        }
+        
+        console.log('Grammar Assistant: updateButtonState - className after ensuring base class:', this.floatingButton.className);
+        
+        switch (state) {
+            case 'analyzing':
+                this.floatingButton.classList.add('analyzing');
+                this.floatingButton.textContent = '⏳';
+                this.floatingButton.style.backgroundColor = '#FF9800';  // Orange
+                break;
+            case 'complete':
+                this.floatingButton.classList.remove('analyzing'); // Remove analyzing class
+                this.floatingButton.textContent = count > 0 ? count.toString() : '✓';
+                this.floatingButton.style.backgroundColor = count > 0 ? '#FFD700' : '#4CAF50';  // Yellow for suggestions, green for no issues
+                console.log('Grammar Assistant: Button updated - text:', this.floatingButton.textContent, 'color:', this.floatingButton.style.backgroundColor);
+                break;
+            case 'error':
+                this.floatingButton.classList.remove('analyzing'); // Remove analyzing class
+                this.floatingButton.textContent = '!';
+                this.floatingButton.style.backgroundColor = '#E74C3C';  // Red
+                break;
+        }
+        
+        // Ensure button is visible if it should be (safeguard against race conditions)
+        if (this.currentElement && !this.floatingButton.classList.contains('visible')) {
+            console.log('Grammar Assistant: Button not visible but should be - making it visible');
+            this.floatingButton.classList.add('visible');
         }
     }
 
-    applyAllSuggestions(suggestions) {
-        // This function is kept for backward compatibility but redirects to applyRemainingFixes
-        this.applyRemainingFixes();
+    updateElementIndicator(element, state) {
+        // Skip indicator updates for now to avoid issues
+        console.log('Grammar Assistant: Element state:', state);
     }
 
-    applyAllToInputElement(element, suggestions) {
-        try {
-            const startPos = this.selectionStart;
-            const endPos = this.selectionEnd;
+    getElementId(element) {
+        if (!element.grammarAssistantId) {
+            element.grammarAssistantId = 'element-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            console.log('Grammar Assistant: Generated new element ID:', element.grammarAssistantId, 'for element:', element.tagName);
+        }
+        return element.grammarAssistantId;
+    }
+
+    loadElementSuggestions(element) {
+        const elementId = this.getElementId(element);
+        // TODO: Load from chrome.storage.local if needed
+    }
+
+    isInteractingWithAssistant() {
+        return document.querySelector('.grammar-floating-btn:hover, .grammar-suggestion-panel:hover');
+    }
+
+    handleGlobalClick(e) {
+        // Hide suggestion panel if clicking outside
+        if (this.suggestionPanel && this.isPanelVisible) {
+            const target = e.target;
             
-            // Validate we have the selection positions
-            if (startPos === null || endPos === null) {
-                console.error('No stored selection positions for input element');
-                return false;
-            }
+            // Check if click is inside the panel or floating button
+            const isInsidePanel = this.suggestionPanel.contains(target);
+            const isInsideButton = this.floatingButton?.contains(target);
             
-            let selectedText = element.value.substring(startPos, endPos);
+            // Check if click is on a grammar highlight (which should not close the panel)
+            const isOnHighlight = target.closest('.grammar-highlight');
             
-            // Apply all suggestions
-            suggestions.forEach(suggestion => {
-                selectedText = selectedText.replace(suggestion.original_text, suggestion.corrected_text);
+            // Check if click is on a tooltip (which should not close the panel)
+            const isOnTooltip = target.closest('.grammar-suggestion-tooltip');
+            
+            console.log('Grammar Assistant: Global click detected', {
+                target: target.tagName,
+                targetClass: target.className,
+                isInsidePanel,
+                isInsideButton,
+                isOnHighlight: !!isOnHighlight,
+                isOnTooltip: !!isOnTooltip
             });
             
-            // Update the input value
-            element.value = element.value.substring(0, startPos) + selectedText + element.value.substring(endPos);
-            
-            // Restore cursor position
-            const newCursorPos = startPos + selectedText.length;
-            element.setSelectionRange(newCursorPos, newCursorPos);
-            element.focus();
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to apply all to input element:', error);
-            return false;
+            // Only close if click is truly outside all our components
+            if (!isInsidePanel && !isInsideButton && !isOnHighlight && !isOnTooltip) {
+                console.log('Grammar Assistant: Closing panel due to outside click');
+                this.hideSuggestionPanel();
+                this.userManuallyClosed = true;  // User manually closed by clicking outside
+            }
         }
-    }
-
-    applyAllToTextNode(suggestions) {
-        try {
-            let text = this.selectionRange.toString();
-            
-            // Apply all suggestions
-            suggestions.forEach(suggestion => {
-                text = text.replace(suggestion.original_text, suggestion.corrected_text);
-            });
-            
-            // Replace the selected text
-            this.selectionRange.deleteContents();
-            this.selectionRange.insertNode(document.createTextNode(text));
-            
-            // Clear selection
-            window.getSelection().removeAllRanges();
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to apply all to text node:', error);
-            return false;
-        }
-    }
-
-    showSuccessMessage(message) {
-        this.showToast(message, 'success');
-    }
-
-    showErrorMessage(message) {
-        this.showToast(message, 'error');
     }
 
     showToast(message, type = 'info') {
+        if (!this.settings.showToasts) return;
+        
         const toast = document.createElement('div');
-        toast.className = `gb-toast gb-toast-${type}`;
+        toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: ${type === 'error' ? '#E74C3C' : type === 'success' ? '#27AE60' : '#3498DB'};
+            color: white;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            z-index: 2147483647;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        `;
         toast.textContent = message;
         
         document.body.appendChild(toast);
         
-        // Show toast
-        setTimeout(() => toast.classList.add('gb-toast-visible'), 100);
-        
-        // Hide toast after 3 seconds
         setTimeout(() => {
-            toast.classList.remove('gb-toast-visible');
-            setTimeout(() => document.body.removeChild(toast), 300);
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(0)';
+        }, 10);
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(100%)';
+            setTimeout(() => toast.remove(), 300);
         }, 3000);
     }
 
-    recreatePopupForResults() {
-        try {
-            const rect = this.getSelectionPosition();
-            if (!rect) {
-                console.error('Cannot recreate popup: no valid selection position');
-                return;
-            }
-
-            this.popup = this.createPopup();
-            this.positionPopup(rect);
+    applyTargetedChange(element, change) {
+        // Apply a specific text change while preserving HTML structure
+        console.log('Grammar Assistant: Applying targeted change:', change);
+        
+        // Walk through all text nodes and find the one containing our text to replace
+        const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+        );
+        
+        let node;
+        while (node = walker.nextNode()) {
+            const nodeText = node.textContent;
             
-            document.body.appendChild(this.popup);
-            this.isPopupVisible = true;
-
-            // Add fade-in animation
-            setTimeout(() => {
-                if (this.popup) {
-                    this.popup.classList.add('gb-popup-visible');
-                }
-            }, 10);
-
-            console.log('Successfully recreated popup for results');
-        } catch (error) {
-            console.error('Failed to recreate popup:', error);
-        }
-    }
-
-    forceCleanupPopups() {
-        // Remove any existing Grammar Bot popups from the page
-        const existingPopups = document.querySelectorAll('.gb-popup');
-        existingPopups.forEach(popup => {
-            console.log('Grammar Bot: Force removing existing popup');
-            if (popup.parentNode) {
-                popup.parentNode.removeChild(popup);
-            }
-        });
-        
-        // Reset state
-        this.popup = null;
-        this.isPopupVisible = false;
-    }
-
-    hidePopup() {
-        if (this.popup && !this.isCheckingGrammar) {
-            console.log('Grammar Bot: Hiding popup normally');
-            console.log('Popup was visible for:', this.popupCreatedTime ? Date.now() - this.popupCreatedTime : 'unknown', 'ms');
-            
-            // Immediately remove from DOM instead of fade out
-            if (this.popup.parentNode) {
-                this.popup.parentNode.removeChild(this.popup);
-                console.log('Grammar Bot: Popup removed from DOM');
-            }
-            
-            this.popup = null;
-            this.isPopupVisible = false;
-        }
-    }
-
-    hidePopupAndClearSelection() {
-        console.log('Grammar Bot: Hiding popup and clearing selection after fixes applied');
-        
-        // Hide the popup first
-        this.hidePopup();
-        
-        // Clear text selection to prevent re-triggering
-        if (this.selectedElement && (this.selectedElement.tagName === 'INPUT' || this.selectedElement.tagName === 'TEXTAREA')) {
-            // For input/textarea elements, clear the selection
-            this.selectedElement.setSelectionRange(this.selectedElement.value.length, this.selectedElement.value.length);
-            console.log('Grammar Bot: Cleared input/textarea selection');
-        } else {
-            // For regular text selections, clear the window selection
-            const selection = window.getSelection();
-            if (selection) {
-                selection.removeAllRanges();
-                console.log('Grammar Bot: Cleared window selection');
+            // Check if this node contains the text we want to replace
+            if (nodeText.includes(change.oldText)) {
+                const newNodeText = nodeText.replace(change.oldText, change.newText);
+                
+                console.log('Grammar Assistant: Targeted replacement in text node:', {
+                    oldNodeText: nodeText,
+                    newNodeText: newNodeText,
+                    oldText: change.oldText,
+                    newText: change.newText
+                });
+                
+                node.textContent = newNodeText;
+                return true;
             }
         }
         
-        // Clean up text node wrapper
-        if (this.textNodeWrapper && this.textNodeWrapper.parentNode) {
-            const parent = this.textNodeWrapper.parentNode;
-            while (this.textNodeWrapper.firstChild) {
-                parent.insertBefore(this.textNodeWrapper.firstChild, this.textNodeWrapper);
-            }
-            parent.removeChild(this.textNodeWrapper);
-            console.log('Grammar Bot: Cleaned up text node wrapper on popup hide');
-        }
-        this.textNodeWrapper = null;
-        
-        // Reset our internal state
-        this.selectedElement = null;
-        this.selectionStart = null;
-        this.selectionEnd = null;
-        this.selectionRange = null;
-        this.selectedText = null;
-        this.appliedSuggestions.clear();
-        this.currentSuggestions = [];
-        this.lastFixAppliedTime = Date.now(); // Mark when fixes were applied
-        
-        console.log('Grammar Bot: Cleared internal state after fixes');
+        console.warn('Grammar Assistant: Could not find text to replace:', change.oldText);
+        return false;
     }
-
-
 }
 
-// Initialize Grammar Bot when DOM is ready (prevent multiple instances)
-if (!window.grammarBot) {
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!window.grammarBot) {
-                window.grammarBot = new GrammarBot();
-            }
-        });
-    } else {
-        window.grammarBot = new GrammarBot();
-    }
-} else {
-    console.log('Grammar Bot: Already initialized, cleaning up any existing popups');
-    // Clean up any existing popups if reinitializing
-    const existingPopups = document.querySelectorAll('.gb-popup');
-    existingPopups.forEach(popup => {
-        if (popup.parentNode) {
-            popup.parentNode.removeChild(popup);
-        }
-    });
-} 
+// Initialize the Grammar Assistant
+const grammarAssistant = new GrammarAssistant(); 
