@@ -26,9 +26,15 @@ class GrammarAssistant {
                 '[contenteditable="true"]', 
                 '[contenteditable=""]',
                 '[contenteditable]',
-                '.docs-textelement-paragraph',  // Google Docs
+                // Google Docs selectors (multiple approaches)
+                '.docs-textelement-paragraph',  // Google Docs paragraphs
                 '.notranslate',  // Google Docs text areas
-                '.kix-paragraphrenderer'  // Google Docs paragraphs
+                '.kix-paragraphrenderer',  // Google Docs paragraphs
+                '.docs-text-paragraph',  // Alternative Google Docs selector
+                '.docs-editor-paragraph',  // Alternative Google Docs selector
+                '[role="textbox"]',  // Generic contenteditable role
+                '.kix-appview-editor',  // Google Docs editor container
+                '.kix-page'  // Google Docs page container
             ]
         };
         
@@ -218,7 +224,7 @@ class GrammarAssistant {
                 background: white;
                 border-radius: 8px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-                padding: 12px;
+                padding: 0;
                 max-width: 320px;
                 max-height: 300px;
                 overflow-y: auto;
@@ -262,20 +268,19 @@ class GrammarAssistant {
             .suggestion-header {
                 font-weight: 600;
                 color: #333;
-                margin-bottom: 8px;
+                margin-bottom: 16px;
                 font-size: 13px;
                 position: sticky;
                 top: 0;
                 background: white;
                 z-index: 10;
-                padding: 8px 0;
-                margin: -12px -12px 8px -12px;
-                padding-left: 12px;
-                padding-right: 12px;
+                padding: 12px 12px 8px 12px;
+                margin: 0 0 16px 0;
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
                 border-bottom: 1px solid #f0f0f0;
+                border-radius: 8px 8px 0 0;
             }
             
             .suggestion-close-btn {
@@ -298,9 +303,9 @@ class GrammarAssistant {
             }
             
             .suggestion-item {
-                padding: 8px;
+                padding: 8px 12px;
                 border-radius: 4px;
-                margin-bottom: 6px;
+                margin: 0 12px 6px 12px;
                 border: 1px solid #e0e0e0;
                 cursor: pointer;
                 transition: all 0.2s ease;
@@ -311,6 +316,8 @@ class GrammarAssistant {
                 border-color: #1DB584;
             }
             
+
+            
             .suggestion-text {
                 font-weight: 500;
                 color: #1DB584;
@@ -320,6 +327,16 @@ class GrammarAssistant {
             .suggestion-reason {
                 font-size: 12px;
                 color: #666;
+            }
+            
+            /* Ensure first suggestion item has proper spacing from header */
+            .suggestion-item:first-of-type {
+                margin-top: 8px;
+            }
+            
+            /* Ensure last suggestion item has proper spacing from panel bottom */
+            .suggestion-item:last-of-type {
+                margin-bottom: 12px;
             }
             
             /* Input Field Indicators */
@@ -440,14 +457,46 @@ class GrammarAssistant {
                 
                 lastContent = currentContent;
                 
+                // Handle empty text case
+                if (currentContent.trim() === '') {
+                    console.log('Grammar Assistant: Text is empty - clearing everything');
+                    if (!this.isApplyingSuggestion) {
+                        const elementId = this.getElementId(element);
+                        this.suggestions.delete(elementId);
+                        this.clearHighlights(element);
+                        this.updateElementIndicator(element, 'clean');
+                        this.updateButtonState('complete', 0);
+                        // Hide suggestion panel if visible
+                        if (this.isPanelVisible) {
+                            this.hideSuggestionPanel();
+                        }
+                    }
+                    return;
+                }
+                
                 if (currentContent.length >= this.config.minTextLength) {
                     console.log('Grammar Assistant: Text length sufficient, queuing analysis');
                     this.queueTextAnalysis(element, currentContent);
                 } else {
-                    console.log('Grammar Assistant: Text too short for analysis');
+                    console.log('Grammar Assistant: Text too short for analysis - clearing suggestions and highlights');
                     if (!this.isApplyingSuggestion) {
+                        // Clear stored suggestions for this element
+                        const elementId = this.getElementId(element);
+                        this.suggestions.delete(elementId);
+                        
+                        // Clear any existing highlights
+                        this.clearHighlights(element);
+                        
+                        // Update UI to show clean state
                         this.updateElementIndicator(element, 'clean');
                         this.updateButtonState('complete', 0);
+                        
+                        // Hide suggestion panel if visible
+                        if (this.isPanelVisible) {
+                            this.hideSuggestionPanel();
+                        }
+                        
+                        console.log('Grammar Assistant: Reset to clean state due to insufficient text length');
                     }
                 }
             } else {
@@ -1570,7 +1619,7 @@ class GrammarAssistant {
             `;
         setTimeout(() => {
                 this.hideSuggestionPanel();
-            }, 2000);
+            }, 1000);
             return;
         }
         
