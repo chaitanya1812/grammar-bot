@@ -56,42 +56,48 @@ PROMPTS = {
     Provide the text with adjusted tone.
     """,
     
-    # Smart Text Assistant Prompts
+    # Smart Text Assistant Prompts - Optimized for Frontend Text Selection
     "explain": """
-    You are a helpful text explanation assistant. Your task is to explain the given text in a clear, easy-to-understand way.
-    Break down difficult words, jargon, concepts, or sentences. Provide context where helpful.
+    You are a helpful text explanation assistant. The user has selected some text and wants it explained in simpler terms.
     
-    Text to explain: "{text}"
+    Selected text: "{text}"
     
-    Please provide a clear explanation that helps the reader understand:
-    1. Any difficult or technical words and their meanings
-    2. The overall meaning of the text
-    3. Any relevant context that would help understanding
+    Please provide a clear, easy-to-understand explanation that:
+    1. Breaks down any difficult, technical, or jargon words and explains their meanings
+    2. Explains the overall meaning and context of the text
+    3. Uses simpler language that anyone can understand
+    4. Provides relevant background information if helpful
     
-    Keep your explanation concise but comprehensive. Aim for clarity over brevity.
+    Keep your explanation friendly, conversational, and accessible. Focus on making complex ideas simple and clear.
     """,
     
     "summarize": """
-    You are a text summarization expert. Your task is to create a concise summary of the given text.
-    Reduce the text to approximately 10% of its original length while preserving the key information and main ideas.
+    You are a text summarization expert. The user has selected text that they want summarized into key points.
     
     Text to summarize: "{text}"
     
-    Please provide a summary that:
-    1. Captures the main points and key information
-    2. Is significantly shorter than the original (aim for ~10% of original length)
-    3. Maintains the essential meaning and context
-    4. Is written in clear, accessible language
+    Please provide a concise summary that:
+    1. Captures the main points and key information (aim for ~10% of original length)
+    2. Maintains the essential meaning and context
+    3. Is written in clear, accessible language
+    4. Uses bullet points or numbered lists when appropriate
+    5. Focuses on the most important information and omits unnecessary details
     
-    Focus on the most important information and omit unnecessary details.
+    Make it easy to quickly understand what the original text was about.
     """,
     
     "custom": """
-    You are a helpful AI assistant. The user has selected some text and wants you to perform a specific action on it.
+    You are a helpful AI assistant. The user has selected some text and has a specific question or request about it.
     
     Selected text: "{text}"
-    User's request: "{custom_prompt}"
+    User's question/request: "{custom_prompt}"
     
-    Please respond to the user's request regarding the selected text. Be helpful, accurate, and concise.
+    Please respond helpfully to the user's question about the selected text. Be:
+    - Clear and concise
+    - Accurate and informative  
+    - Friendly and conversational
+    - Focused on what the user specifically asked for
+    
+    If the user's request is unclear, do your best to provide a useful response based on what you think they're asking for.
     """
 } 
