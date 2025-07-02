@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Text Assistant Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+            background: #f5f5f5;
+        }
+        
+        .content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .test-section {
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .test-section h2 {
+            color: #2d5aa0;
+            margin-bottom: 15px;
+        }
+        
+        .instructions {
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            border-left: 4px solid #2d5aa0;
+        }
+        
+        .technical-text {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #6f42c1;
+        }
+        
+        .long-text {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #ffc107;
+        }
+        
+        .creative-text {
+            background: #d1ecf1;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #17a2b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <h1>🧠 Smart Text Assistant Test Page</h1>
+        
+        <div class="instructions">
+            <h3>How to Test:</h3>
+            <ol>
+                <li>Make sure your backend is running: <code>cd backend && python main.py</code></li>
+                <li>Load this page as a Chrome extension content script</li>
+                <li>Select any text below and see the Smart Text Assistant popup appear</li>
+                <li>Try the three actions: <strong>Explain</strong>, <strong>Summarize</strong>, and <strong>Custom Prompt</strong></li>
+            </ol>
+        </div>
+
+        <div class="test-section">
+            <h2>💡 Test "Explain" Feature</h2>
+            <p>Select technical or complex text to test the explanation feature:</p>
+            
+            <div class="technical-text">
+                <p><strong>Machine Learning Jargon:</strong> The convolutional neural network utilizes backpropagation algorithms to optimize hyperparameters through gradient descent, achieving state-of-the-art performance on computer vision tasks with transfer learning methodologies.</p>
+            </div>
+            
+            <div class="technical-text">
+                <p><strong>Scientific Text:</strong> The photosynthesis process involves the Calvin cycle where carbon dioxide is fixed into glucose through a series of enzymatic reactions catalyzed by RuBisCO in the chloroplast stroma.</p>
+            </div>
+            
+            <div class="technical-text">
+                <p><strong>Financial Terms:</strong> The portfolio's beta coefficient indicates its systematic risk relative to market volatility, while the Sharpe ratio measures risk-adjusted returns considering the risk-free rate.</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>📋 Test "Summarize" Feature</h2>
+            <p>Select longer paragraphs to test the summarization feature:</p>
+            
+            <div class="long-text">
+                <p><strong>History Passage:</strong> The Renaissance was a period of cultural, artistic, political and economic "rebirth" following the Middle Ages. Generally described as taking place from the 14th century to the 17th century, the Renaissance promoted the rediscovery of classical philosophy, literature and art. Some of the greatest thinkers, authors, statesmen, scientists and artists in human history thrived during this era, while global exploration opened up new lands and cultures to European commerce. The Renaissance is credited with bridging the gap between the Middle Ages and modern-day civilization. The Renaissance started in Florence, Italy, a place with a rich cultural history where wealthy citizens could afford to support budding artists. Members of the powerful Medici family, which ruled Florence for more than 60 years, were famous backers of the movement. Great Italian artists, writers and inventors of the Renaissance include Leonardo da Vinci, Michelangelo, Dante and Galileo.</p>
+            </div>
+            
+            <div class="long-text">
+                <p><strong>Technology Article:</strong> Artificial intelligence has evolved significantly over the past decade, transforming from a theoretical concept to practical applications that affect our daily lives. Modern AI systems can process natural language, recognize images, make predictions, and even create original content. Machine learning algorithms, particularly deep learning neural networks, have revolutionized fields such as healthcare, finance, transportation, and entertainment. However, this rapid advancement also raises important questions about privacy, job displacement, algorithmic bias, and the need for responsible AI development. Companies and researchers are now focusing on creating AI systems that are not only powerful but also transparent, fair, and aligned with human values. The future of AI promises even more sophisticated capabilities, but it will require careful consideration of ethical implications and societal impact to ensure that these technologies benefit humanity as a whole.</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>✏️ Test "Custom Prompt" Feature</h2>
+            <p>Select any text and try custom prompts like:</p>
+            <ul>
+                <li>"Translate this to Spanish"</li>
+                <li>"What are the main arguments?"</li>
+                <li>"Explain this like I'm 5 years old"</li>
+                <li>"What questions does this raise?"</li>
+                <li>"How is this relevant today?"</li>
+            </ul>
+            
+            <div class="creative-text">
+                <p><strong>Philosophy Quote:</strong> "The only true wisdom is in knowing you know nothing." - Socrates. This ancient Greek philosopher's famous paradox highlights the importance of intellectual humility and the recognition that knowledge is infinite while human understanding is limited.</p>
+            </div>
+            
+            <div class="creative-text">
+                <p><strong>News Excerpt:</strong> Climate scientists report that global temperatures have risen by 1.1 degrees Celsius since pre-industrial times, with the last decade being the warmest on record. This warming trend is primarily attributed to human activities, particularly greenhouse gas emissions from fossil fuel consumption and deforestation.</p>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>🔧 Troubleshooting</h2>
+            <p>If the feature isn't working:</p>
+            <ul>
+                <li>Check that the backend server is running on <code>http://localhost:8000</code></li>
+                <li>Open browser console (F12) to see any error messages</li>
+                <li>Make sure the Chrome extension is loaded and enabled</li>
+                <li>Try refreshing the page</li>
+                <li>Ensure you have a valid GEMINI_API_KEY in your .env file</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Simple test to show when the extension is loaded
+        console.log('🧠 Smart Text Assistant test page loaded!');
+        console.log('Select any text to test the Smart Text Assistant feature.');
+        
+        // Add a small indicator when extension is detected
+        setTimeout(() => {
+            if (window.smartTextAssistant) {
+                const indicator = document.createElement('div');
+                indicator.innerHTML = '✅ Smart Text Assistant is active!';
+                indicator.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    right: 10px;
+                    background: #28a745;
+                    color: white;
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    z-index: 1000;
+                `;
+                document.body.appendChild(indicator);
+            }
+        }, 1000);
+    </script>
+</body>
+</html> 
